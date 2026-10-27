@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Story Bank Search</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f7f7f5; --card: #ffffff; --text: #1f2328; --muted: #656d76; --border: #d8dce0;
+    --accent: #1f6feb; --accent-text: #ffffff; --ok-bg: #e6f4ea; --warn-bg: #fff4d6; --err: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a; --card: #1c1f24; --text: #e6e8eb; --muted: #9aa3ad; --border: #353a42;
+      --accent: #4c8dff; --accent-text: #0b0d10; --ok-bg: #16301f; --warn-bg: #3a3014; --err: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.4rem; margin: 0 0 16px; }
+  form { display: grid; gap: 12px; }
+  input[type="text"], select, button {
+    font: inherit; color: inherit; background: var(--card);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+  }
+  input[type="text"] { width: 100%; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .modes label { margin-right: 14px; cursor: pointer; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 0.875rem; margin: 0; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 24px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+  .card-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 10px; }
+  .badge { font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .badge.cited { background: var(--ok-bg); }
+  .query { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 0.8125rem; }
+  .hit { padding: 8px 0; border-top: 1px solid var(--border); }
+  .hit:first-child { border-top: 0; padding-top: 0; }
+  .hit p { margin: 4px 0 0; color: var(--muted); font-size: 0.9375rem; overflow-wrap: anywhere; }
+  .answer { white-space: pre-wrap; margin: 0 0 12px; overflow-wrap: anywhere; }
+  .notfound { background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; margin: 0 0 12px; }
+  .warn { background: var(--warn-bg); border-radius: 8px; padding: 6px 12px; margin: 0 0 12px; font-size: 0.875rem; }
+  .error { color: var(--err); margin: 0; }
+  h2 { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 12px 0 4px; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Story Bank Search</h1>
+
+  <form id="form">
+    <input id="query" type="text" maxlength="500" autocomplete="off" required
+           placeholder="Describe a situation or ask a question" aria-label="Query">
+    <div class="row">
+      <span class="modes" role="radiogroup" aria-label="Mode">
+        <label><input type="radio" name="mode" value="search" checked> Search</label>
+        <label><input type="radio" name="mode" value="ask"> Ask</label>
+      </span>
+      <label>Stories (k)
+        <select id="k" aria-label="Number of stories">
+          <option>1</option><option selected>3</option><option>5</option><option>10</option>
+        </select>
+      </label>
+      <button id="submit" class="primary" type="submit">Search</button>
+    </div>
+    <p id="mode-hint" class="hint"></p>
+  </form>
+
+  <div class="toolbar">
+    <span class="hint" id="count" aria-live="polite"></span>
+    <button id="clear" type="button" hidden>Clear history</button>
+  </div>
+  <div id="history"></div>
+</main>
+
+<script>
+  // Talks only to this server (same origin); no API keys ever reach the browser.
+  // History lives in the page only: it grows until you press Clear or refresh the page.
+  const form = document.getElementById("form");
+  const queryInput = document.getElementById("query");
+  const kSelect = document.getElementById("k");
+  const submitBtn = document.getElementById("submit");
+  const hint = document.getElementById("mode-hint");
+  const historyEl = document.getElementById("history");
+  const clearBtn = document.getElementById("clear");
+  const countEl = document.getElementById("count");
+  let busy = false;
+
+  // Everything is inserted with textContent (never innerHTML), so story or model text can't inject markup.
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  const HINTS = {
+    search: "Search embeds your query and shows the closest stories. Almost free.",
+    ask: "Ask also sends the top stories to the chat model to write an answer. It is a paid call, so one click = one charge.",
+  };
+  function currentMode() { return form.elements.mode.value; }
+  function updateMode() {
+    hint.textContent = HINTS[currentMode()];
+    submitBtn.textContent = currentMode() === "ask" ? "Ask" : "Search";
+  }
+  form.addEventListener("change", updateMode);
+  updateMode();
+
+  function updateHistoryUi() {
+    const n = historyEl.children.length;
+    clearBtn.hidden = n === 0;
+    countEl.textContent = n === 0 ? "No history yet. Results stay here until you refresh or clear." : `${n} in history (newest first)`;
+  }
+  clearBtn.addEventListener("click", () => { historyEl.replaceChildren(); updateHistoryUi(); });
+  updateHistoryUi();
+
+  async function callApi(mode, query, k) {
+    let res;
+    try {
+      res = mode === "ask"
+        ? await fetch("/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question: query, k }) })
+        : await fetch(`/search?q=${encodeURIComponent(query)}&k=${k}`);
+    } catch {
+      throw new Error("Could not reach the server. Is it running? (npm run api)");
+    }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Error ${res.status}: ${body.message || body.error || "request failed"}`);
+    return body;
+  }
+
+  function renderSearch(body) {
+    const box = el("div");
+    if (body.results.length === 0) box.append(el("p", "empty", "No results."));
+    for (const hit of body.results) {
+      const row = el("div", "hit");
+      const head = el("div", "card-head");
+      head.append(el("span", "badge", hit.story_id), el("strong", "", hit.title), el("span", "meta", `score ${hit.score.toFixed(3)}`));
+      row.append(head, el("p", "", hit.snippet.length >= 300 ? hit.snippet + "…" : hit.snippet));
+      box.append(row);
+    }
+    return box;
+  }
+
+  function renderAsk(body) {
+    const box = el("div");
+    if (body.found) box.append(el("p", "answer", body.answer));
+    else box.append(el("p", "notfound", "Not found in the story bank."));
+    if (body.truncated) box.append(el("p", "warn", "The answer hit the length limit and may be cut off."));
+    if (body.invalidCitations.length) box.append(el("p", "warn", `The answer cited stories that were not retrieved: ${body.invalidCitations.join(", ")}`));
+
+    box.append(el("h2", "", "Sources"));
+    for (const s of body.sources) {
+      const row = el("div", "hit");
+      const head = el("div", "card-head");
+      head.append(el("span", "badge" + (body.cited.includes(s.story_id) ? " cited" : ""), s.story_id), el("strong", "", s.title));
+      head.append(el("span", "meta", `score ${s.score.toFixed(3)}${body.cited.includes(s.story_id) ? " · cited" : ""}`));
+      row.append(head);
+      box.append(row);
+    }
+    box.append(el("p", "meta", `Tokens: ${body.usage.prompt_tokens} in / ${body.usage.completion_tokens} out · ${body.model}`));
+    return box;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (busy) return; // one request at a time, so a double-click can't cause two paid calls
+    const query = queryInput.value.trim();
+    if (!query) return;
+    const mode = currentMode();
+    const k = Number(kSelect.value);
+
+    busy = true;
+    submitBtn.disabled = true;
+
+    // Add the card immediately (newest on top), then fill it in when the response arrives.
+    const card = el("section", "card");
+    const head = el("div", "card-head");
+    head.append(el("span", "badge", mode === "ask" ? "Ask" : "Search"), el("span", "query", query), el("span", "meta", `k=${k} · ${new Date().toLocaleTimeString()}`));
+    const body = el("div", "", mode === "ask" ? "Asking…" : "Searching…");
+    card.append(head, body);
+    historyEl.prepend(card);
+    updateHistoryUi();
+
+    try {
+      const data = await callApi(mode, query, k);
+      body.replaceChildren(mode === "ask" ? renderAsk(data) : renderSearch(data));
+    } catch (err) {
+      body.replaceChildren(el("p", "error", err.message));
+    } finally {
+      busy = false;
+      submitBtn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

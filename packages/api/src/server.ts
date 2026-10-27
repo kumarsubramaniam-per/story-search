@@ -1,4 +1,6 @@
 import "./env.js";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import { searchStories } from "./searchMilvus.js";
 import { askQuestion } from "./rag.js";
@@ -10,6 +12,11 @@ const DEFAULT_K = 3;
 const app = Fastify({ logger: true, disableRequestLogging: true });
 
 app.get("/health", async () => ({ ok: true }));
+
+// The web page (packages/web/index.html) is served from the same origin as the API, so no CORS is needed.
+// It is read on each request, so edits show up on refresh without restarting the server.
+const indexPath = fileURLToPath(new URL("../../web/index.html", import.meta.url));
+app.get("/", async (_req, reply) => reply.type("text/html; charset=utf-8").send(fs.readFileSync(indexPath, "utf8")));
 
 // GET /search?q=...&k=3  ->  ranked stories with scores
 app.get(
