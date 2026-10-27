@@ -38,7 +38,7 @@ const { questions, negative_cases: negatives = [] } = JSON.parse(
 
 type Hit = { story_id: string; score: number };
 
-// Story ids may be written "A1" or "story-a1"; compare them the same way.
+// An id may be written with or without the "story-" prefix; compare them the same way.
 const norm = (id: string) => id.toLowerCase().replace(/^story-/, "");
 
 // --- direct mode: embed (with a disk cache), then search by vector ---------------------------------

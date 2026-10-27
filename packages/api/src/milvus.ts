@@ -1,5 +1,5 @@
 import { MilvusClient, DataType } from "@zilliz/milvus2-sdk-node";
-import type { Chunk } from "./chunk.js";
+import { CHUNK_ID_MAX_LENGTH, STORY_ID_MAX_LENGTH, type Chunk } from "./chunk.js";
 import { EMBEDDING_DIMS } from "./embed.js";
 
 export const COLLECTION = "stories";
@@ -35,8 +35,8 @@ export async function ensureCollection(rebuild: boolean): Promise<void> {
   await milvus.createCollection({
     collection_name,
     fields: [
-      { name: "chunk_id", data_type: DataType.VarChar, max_length: 64, is_primary_key: true },
-      { name: "story_id", data_type: DataType.VarChar, max_length: 32 },
+      { name: "chunk_id", data_type: DataType.VarChar, max_length: CHUNK_ID_MAX_LENGTH, is_primary_key: true },
+      { name: "story_id", data_type: DataType.VarChar, max_length: STORY_ID_MAX_LENGTH },
       { name: "title", data_type: DataType.VarChar, max_length: 512 },
       { name: "text", data_type: DataType.VarChar, max_length: 65535 },
       { name: "source_file", data_type: DataType.VarChar, max_length: 512 },

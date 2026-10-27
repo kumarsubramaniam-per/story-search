@@ -20,19 +20,20 @@ Give Docker enough memory: Docker Desktop → Settings → Resources → at leas
 
 ## 2. Private story folder (outside the repo)
 
-The story bank never goes inside `story-search` or into git. Create a private folder anywhere outside the repo, for example:
+Your content never goes inside `story-search` or into git. Create a private folder anywhere outside the repo, for example:
 
 ```bash
-mkdir -p ~/private/story-bank
+mkdir -p ~/private/stories
 ```
 
-Put your story bank document in that folder and point `STORIES_DIR` at it (step 4). Expected input format (see spec §3):
+Put your documents in that folder (any depth of sub-folders) and point `STORIES_DIR` at it (step 4). A **story** is any self-contained piece of content small enough to embed as one chunk: an article, a note, an FAQ entry, a Q&A, a case study (up to a few thousand words). Supported files are `.pdf`, `.txt` and `.md`; hidden files and folders are skipped. Two layouts work, and you can mix them (see spec §3):
 
-- A PDF containing the stories
-- Each story starts with a short code header (e.g. `A1`) followed by its title
-- Ingest splits one chunk per story, uses the code as `story_id`, and strips repeated page headers/footers
+- **One story per file** (the default): the file's first non-empty line is the story's title.
+- **Several stories per file**: set `STORY_HEADER_PATTERN` in `.env` (step 4) to a regular expression matching the line that starts each story.
 
-Optional: put the eval questions here too (instead of `packages/eval/questions.json`) if the repo will ever be public.
+Each story's id is made from its title (`Getting Started` becomes `getting-started`), unless your pattern captures an id. Ingest strips repeated page headers and footers from PDFs.
+
+Optional: put eval questions here too (`questions.json`, see spec §7); the eval reads them from `STORIES_DIR`, so they stay out of the repo.
 
 ---
 
@@ -57,18 +58,29 @@ Permission changes can take a few minutes to apply; if the first call fails with
 
 ## 4. `.env` file (repo root)
 
-Create `story-search/.env` (git-ignored). Use **absolute paths** — `dotenv` does not expand `~`.
+Create `story-search/.env` (git-ignored). Use **absolute paths** — the loader does not expand `~`.
 
 ```bash
 OPENAI_API_KEY=sk-...                         # project-scoped key from step 3
-STORIES_DIR=/Users/<you>/private/story-bank   # absolute path
-CHAT_MODEL=<OpenAI's current small chat model>
+STORIES_DIR=/Users/<you>/private/stories      # absolute path
+CHAT_MODEL=<an OpenAI chat model your key can call>
 ```
+
+To split files into several stories, add (optional; leave unset for one story per file):
+
+```bash
+STORY_HEADER_PATTERN='^## (?<title>.+)$'      # matches the line that starts each story
+STORY_BODY_START_PATTERN='...'                # only if titles can wrap over several lines
+```
+
+- `STORY_HEADER_PATTERN` is a regular expression. It needs a named group `(?<title>...)` and may have `(?<id>...)` to use your own ids. Examples: `'^## (?<title>.+)$'` for markdown headings; `'^(?<id>[A-Z]\d+) - (?<title>.+)$'` for lines like `A1 - Some Title`.
+- `STORY_BODY_START_PATTERN` is a regular expression matching the first line of the body. Lines between the header and that line are added to the title. Leave it unset when titles fit on one line.
+- Wrap both in single quotes so backslashes survive.
 
 Also commit a `.env.example` with the same variable names and no values.
 
 Notes:
-- There is one `.env` at the repo root, shared by all packages. Code loads it by explicit path (two levels up from the package source), because npm workspace scripts run from inside each package folder.
+- There is one `.env` at the repo root, shared by all packages. Code loads it by explicit path (three levels up from `packages/api/src`), because npm workspace scripts run from inside each package folder.
 - No shell config (`~/.zshrc`) changes are needed.
 
 Check `.gitignore` contains `.env` **before the first commit**.
@@ -146,8 +158,8 @@ Optional: run **Attu**, Milvus's web UI, to browse collections visually.
 Prework is done when:
 
 - [ ] `docker compose ps` shows all three Milvus containers healthy
-- [ ] `.env` exists at the repo root with all three variables; `.env` and `volumes/` are git-ignored
-- [ ] Story bank document is in the folder `STORIES_DIR` points to (outside the repo)
+- [ ] `.env` exists at the repo root with the three required variables (plus `STORY_HEADER_PATTERN` if you split files into several stories); `.env` and `volumes/` are git-ignored
+- [ ] Your documents are in the folder `STORIES_DIR` points to (outside the repo)
 - [ ] OpenAI project has a budget limit
 - [ ] A small connection script (milestone 1) connects to `localhost:19530` and prints the Milvus server version
 

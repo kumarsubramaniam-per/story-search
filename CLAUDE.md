@@ -1,6 +1,6 @@
 # CLAUDE.md — story-search
 
-Local learning project: semantic search and RAG over an interview story bank, using Milvus (vector DB) and OpenAI, with Elasticsearch hybrid search in v2.
+Local learning project: semantic search and RAG over a private collection of documents ("stories"), using Milvus (vector DB) and OpenAI, with Elasticsearch hybrid search in v2. The project is content-agnostic (see "Keep it generic").
 
 - **What to build:** `spec.md` is the source of truth (scope, data model, API, milestones, decisions).
 - **Environment setup:** `SETUP.md` (Docker, Milvus, `.env`, OpenAI key). The prework is already done when you start.
@@ -13,18 +13,38 @@ Local learning project: semantic search and RAG over an interview story bank, us
 - Prefer small, readable code over clever abstractions; this is a learning project, so explain non-obvious Milvus/OpenAI calls briefly in comments.
 - If the spec is ambiguous or seems wrong, ask rather than guess. Don't silently change decisions recorded in spec §11.
 
+## Keeping the spec current
+
+`spec.md` must always describe what the code actually does.
+
+- At the end of each milestone, before the summary and commit, compare the work with the spec and update every section that now differs or that the work extended: §3 flows, §4 architecture, §5 data model, §6 API, §7 results, §8 guardrails, §9 milestone status, §10 layout, and new decisions in §11. Bump the version line.
+- Record only real deviations and additions; don't restate what is already accurate.
+- Never silently change or remove an existing §11 decision. If the work contradicts one, ask first, then record the change and the reason.
+- Commit the spec changes together with the milestone, and list them in the milestone summary.
+- If the work changes the setup steps, say so and ask before editing `SETUP.md`.
+
+## Keep it generic
+
+Anyone should be able to use this project for their own content by setting environment variables and pointing `STORIES_DIR` at their files. A "story" is any self-contained piece of content small enough to embed as one chunk (article, note, FAQ entry, Q&A...).
+
+- Nothing in code, prompts, UI text, comments, docs, tests or commit messages may be specific to one dataset or domain. Use neutral words ("story", "collection", "document") and made-up neutral examples.
+- Never put real story titles, ids, names or text from `STORIES_DIR` in the repo, even in a comment or example.
+- Don't hardcode a document layout (header shapes, marker phrases, id formats) or assume an id shape. Anything specific to one collection is configuration: an env variable (name in `.env.example`) or a file in `STORIES_DIR`.
+- Before finishing a milestone, grep the changes for domain-specific words and for hardcoded layouts, and fix what you find.
+
 ## Do not touch
 
 - **`docker-compose.yml`**: don't modify, regenerate or re-download it. It contains a required MinIO image fix (see SETUP.md §5).
-- **`spec.md` and `SETUP.md`**: only edit when asked.
-- **`volumes/`**: Milvus data; never edit or delete unless asked.
+- **`SETUP.md`**: only edit when asked.
+- **`spec.md`**: keep it current (see "Keeping the spec current"), but never change or remove an existing §11 decision without asking; new decisions may be added.
+- **`volumes/`**: Milvus data (the folder under `DOCKER_VOLUME_DIRECTORY`, see SETUP.md §5); never edit or delete unless asked.
 
 ## Secrets and private data
 
 - Never print, log, echo or commit the contents of `.env` or the API key. Read config via environment variables only.
 - `.env` lives at the repo root and is git-ignored; keep `.env.example` in sync (names only, no values).
 - Story documents live **outside the repo** in `STORIES_DIR`. Read them from there; never copy story text into the repo, fixtures, tests or logs.
-- Don't commit generated data, embeddings or Milvus volumes.
+- Don't commit generated data, embeddings or Milvus volumes. Generated files derived from stories (such as the eval embedding cache) go in the hidden `STORIES_DIR/.story-search/` folder, never in the repo.
 
 ## Stack and conventions
 
@@ -39,7 +59,7 @@ Local learning project: semantic search and RAG over an interview story bank, us
 ## Cost guardrails (spec §8)
 
 - Log `usage` token counts for every embedding and chat call.
-- Set `max_tokens` on chat calls; pre-count prompt tokens and reject oversized prompts.
+- Cap chat output with `max_completion_tokens` (newer models reject `max_tokens`); pre-count prompt tokens and reject oversized prompts.
 - Re-embed only new or changed stories (compare `content_hash`).
 - Don't run ingest or eval in loops or retries that could call the API repeatedly without asking.
 
@@ -51,4 +71,10 @@ Local learning project: semantic search and RAG over an interview story bank, us
 docker compose ps            # container status
 docker compose logs -f standalone   # Milvus logs
 curl http://localhost:9091/healthz  # Milvus health (expects OK)
+
+npm run check:milvus         # connect to Milvus and print its version
+npm run ingest:dry           # parse and chunk only; no OpenAI or Milvus calls
+npm run ingest -- [--rebuild] [--batch-size N]   # embed new/changed stories into Milvus
+npm run api                  # Fastify server + web page at http://127.0.0.1:3000
+npm run eval -- [--ask] [--mode http] [--no-cache]   # search eval; --ask makes paid chat calls
 ```

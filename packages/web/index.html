@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Story Bank Search</title>
+<title>Story Search</title>
 <link rel="icon" href="data:,">
 <style>
   :root {
@@ -52,11 +52,11 @@
 </head>
 <body>
 <main>
-  <h1>Story Bank Search</h1>
+  <h1>Story Search</h1>
 
   <form id="form">
     <input id="query" type="text" maxlength="500" autocomplete="off" required
-           placeholder="Describe a situation or ask a question" aria-label="Query">
+           placeholder="Search or ask about your stories" aria-label="Query">
     <div class="row">
       <span class="modes" role="radiogroup" aria-label="Mode">
         <label><input type="radio" name="mode" value="search" checked> Search</label>
@@ -150,7 +150,7 @@
   function renderAsk(body) {
     const box = el("div");
     if (body.found) box.append(el("p", "answer", body.answer));
-    else box.append(el("p", "notfound", "Not found in the story bank."));
+    else box.append(el("p", "notfound", "Not found in the collection."));
     if (body.truncated) box.append(el("p", "warn", "The answer hit the length limit and may be cut off."));
     if (body.invalidCitations.length) box.append(el("p", "warn", `The answer cited stories that were not retrieved: ${body.invalidCitations.join(", ")}`));
 

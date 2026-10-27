@@ -7,12 +7,12 @@ import { searchByVector, searchStories } from "./searchMilvus.js";
 const MAX_PROMPT_TOKENS = 12_000; // k=3 is ~3k; this still allows k=10
 const MAX_COMPLETION_TOKENS = 1000;
 
-export const NOT_FOUND = "Not found in the story bank.";
+export const NOT_FOUND = "Not found in the collection.";
 
-const SYSTEM_PROMPT = `You answer questions about a personal interview story bank, using ONLY the stories given in the context.
+const SYSTEM_PROMPT = `You answer questions using ONLY the stories given in the context. Each story starts with its id in square brackets.
 Rules:
 - Use only facts stated in the context. Do not use outside knowledge and do not guess.
-- Cite the story behind each claim by its id in square brackets, for example [A1]. Only cite ids that appear in the context.
+- Cite the story behind each claim by its id in square brackets, copied exactly from the context. Only cite ids that appear in the context.
 - If the context does not contain the answer, reply exactly: ${NOT_FOUND}
 - Be concise: under 200 words.
 - Write plain text only: no markdown, so no bold, bullet points or headings.`;
@@ -37,6 +37,24 @@ export type AskResult = {
   sources: { chunk_id: string; story_id: string; title: string; score: number }[]; // everything retrieved
   usage: { prompt_tokens: number; completion_tokens: number };
 };
+
+/**
+ * Finds the story ids an answer cites, written like [id] or [id1, id2]. Ids can have any shape, so a bracketed
+ * token counts as a citation if it is a retrieved id; id-like tokens that are not retrieved are reported as invalid.
+ */
+export function parseCitations(answer: string, retrievedIds: Set<string>): { cited: string[]; invalid: string[] } {
+  const cited = new Set<string>();
+  const invalid = new Set<string>();
+  for (const group of answer.matchAll(/\[([^\]]+)\]/g)) {
+    const inner = group[1].trim();
+    const tokens = retrievedIds.has(inner) ? [inner] : inner.split(/[,;\s]+/).filter(Boolean);
+    for (const token of tokens) {
+      if (retrievedIds.has(token)) cited.add(token);
+      else if (/^[\w.-]+$/.test(token)) invalid.add(token);
+    }
+  }
+  return { cited: [...cited], invalid: [...invalid] };
+}
 
 /** Retrieval-augmented answer: find the k closest stories, then have the chat model answer from them only. */
 export async function askQuestion(question: string, k: number, queryVector?: number[]): Promise<AskResult> {
@@ -76,20 +94,15 @@ export async function askQuestion(question: string, k: number, queryVector?: num
   const choice = res.choices[0];
   const answer = (choice.message.content ?? "").trim();
 
-  // Citations look like [A1] or [A1, R2]; keep only ids that match the story-id shape.
-  const mentioned = new Set<string>();
-  for (const group of answer.matchAll(/\[([^\]]+)\]/g)) {
-    for (const id of group[1].split(/[,;\s]+/)) if (/^[A-Z]\d+$/.test(id)) mentioned.add(id);
-  }
-  const retrieved = new Set(hits.map((h) => h.story_id));
+  const { cited, invalid } = parseCitations(answer, new Set(hits.map((h) => h.story_id)));
 
   return {
     answer,
     model: res.model,
     found: !answer.toLowerCase().startsWith(NOT_FOUND.toLowerCase().replace(/\.$/, "")),
     truncated: choice.finish_reason === "length",
-    cited: [...mentioned].filter((id) => retrieved.has(id)),
-    invalidCitations: [...mentioned].filter((id) => !retrieved.has(id)),
+    cited,
+    invalidCitations: invalid,
     sources: hits.map((h) => ({ chunk_id: h.chunk_id, story_id: h.story_id, title: h.title, score: h.score })),
     usage,
   };
