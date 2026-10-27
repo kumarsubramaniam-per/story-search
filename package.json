@@ -9,8 +9,10 @@
     "dev:up": "./scripts/dev-up.sh",
     "dev:down": "./scripts/dev-down.sh",
     "check:milvus": "npm run check:milvus -w @story-search/api",
-    "ingest": "npm run ingest -w @story-search/api",
-    "ingest:dry": "npm run ingest:dry -w @story-search/api"
+    "ingest": "tsx packages/api/src/ingest.ts",
+    "ingest:dry": "tsx packages/api/src/ingest.ts --dry-run",
+    "api": "tsx packages/api/src/server.ts",
+    "eval": "tsx packages/eval/runEval.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

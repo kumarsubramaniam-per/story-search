@@ -8,7 +8,7 @@ export const milvus = new MilvusClient({ address: "localhost:19530" });
 
 // Milvus retries failed writes internally, so a storage problem shows up as a silent stall.
 // Fail loudly instead (this happened once when the data folder sat inside iCloud-synced ~/Documents).
-async function withTimeout<T>(p: Promise<T>, label: string, ms = 60_000): Promise<T> {
+export async function withTimeout<T>(p: Promise<T>, label: string, ms = 60_000): Promise<T> {
   let timer: NodeJS.Timeout;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`Milvus ${label} timed out after ${ms / 1000}s`)), ms);

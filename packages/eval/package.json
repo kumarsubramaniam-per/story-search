@@ -1,0 +1,8 @@
+{
+  "name": "@story-search/eval",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "eval": "tsx runEval.ts"
+  }
+}

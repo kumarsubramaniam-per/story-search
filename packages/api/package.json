@@ -5,10 +5,12 @@
   "scripts": {
     "check:milvus": "tsx src/checkMilvus.ts",
     "ingest": "tsx src/ingest.ts",
-    "ingest:dry": "tsx src/ingest.ts --dry-run"
+    "ingest:dry": "tsx src/ingest.ts --dry-run",
+    "dev": "tsx src/server.ts"
   },
   "dependencies": {
     "@zilliz/milvus2-sdk-node": "^3.0.6",
+    "fastify": "^5.12.7",
     "js-tiktoken": "^1.0.21",
     "openai": "^7.45.1",
     "pdfjs-dist": "^6.4.299"
