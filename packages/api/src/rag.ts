@@ -36,6 +36,7 @@ export type AskResult = {
   invalidCitations: string[]; // ids the answer cites that were NOT in the context (should be empty)
   sources: { chunk_id: string; story_id: string; title: string; score: number }[]; // everything retrieved
   usage: { prompt_tokens: number; completion_tokens: number };
+  noMatches: boolean; // true when no story scored above MIN_SCORE: the chat model was not called
 };
 
 /**
@@ -63,6 +64,22 @@ export async function askQuestion(question: string, k: number, queryVector?: num
 
   // Retrieve. A precomputed query vector (the eval's cache) skips the embedding call.
   const hits = queryVector ? await searchByVector(queryVector, k) : await searchStories(question, k);
+
+  // Nothing close enough (MIN_SCORE): skip the paid chat call and say so.
+  if (hits.length === 0) {
+    console.log("Chat: skipped, no story scored above MIN_SCORE");
+    return {
+      answer: NOT_FOUND,
+      model: "",
+      found: false,
+      truncated: false,
+      cited: [],
+      invalidCitations: [],
+      sources: [],
+      usage: { prompt_tokens: 0, completion_tokens: 0 },
+      noMatches: true,
+    };
+  }
 
   const context = hits.map((h) => `[${h.story_id}] ${h.title}\n${h.text}`).join("\n\n---\n\n");
   const messages = [
@@ -105,5 +122,6 @@ export async function askQuestion(question: string, k: number, queryVector?: num
     invalidCitations: invalid,
     sources: hits.map((h) => ({ chunk_id: h.chunk_id, story_id: h.story_id, title: h.title, score: h.score })),
     usage,
+    noMatches: false,
   };
 }

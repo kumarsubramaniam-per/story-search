@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { embedTexts, EMBEDDING_MODEL } from "../api/src/embed.js";
-import { searchByVector } from "../api/src/searchMilvus.js";
+import { searchByVector, getMinScore } from "../api/src/searchMilvus.js";
 import { askQuestion, type AskResult } from "../api/src/rag.js";
 import { milvus } from "../api/src/milvus.js";
 
@@ -107,13 +107,19 @@ async function askHttp(question: string): Promise<AskResult> {
 // --- run ---------------------------------------------------------------------------------------------
 
 async function runSearchEval(vectors: Map<string, number[]>): Promise<void> {
+  const minScore = getMinScore();
   let inTop = 0;
   let first = 0;
+  let weakest: { id: string; score: number } | undefined; // lowest score among the correct matches
   for (const q of questions) {
-    const hits = mode === "direct" ? await searchByVector(vectors.get(q.question)!, TOP_K) : await searchHttp(q.question);
+    // Direct mode searches without the threshold, then applies MIN_SCORE here exactly as the app does, so the
+    // raw scores stay available for the gap report below. In http mode the server has already applied it.
+    const raw = mode === "direct" ? await searchByVector(vectors.get(q.question)!, TOP_K, null) : await searchHttp(q.question);
+    const hits = mode === "direct" ? raw.filter((h) => minScore === null || h.score >= minScore) : raw;
     const rank = hits.findIndex((h) => norm(h.story_id) === norm(q.expected_story_id)) + 1; // 0 = not found
     if (rank > 0) inTop++;
     if (rank === 1) first++;
+    if (rank > 0 && (!weakest || hits[rank - 1].score < weakest.score)) weakest = { id: q.id, score: hits[rank - 1].score };
 
     // Only ids, ranks and scores are printed, never question or story text.
     const top = hits.map((h) => `${h.story_id}(${h.score.toFixed(2)})`).join(" ");
@@ -124,6 +130,27 @@ async function runSearchEval(vectors: Map<string, number[]>): Promise<void> {
 
   console.log(`\n${inTop}/${questions.length} expected story in top ${TOP_K} (target >= ${TARGET}); ${first} ranked first`);
   if (inTop < TARGET) process.exitCode = 1;
+
+  // Help choose MIN_SCORE: it should sit between the strongest negative-case match and the weakest correct match.
+  if (mode === "direct") {
+    let strongestNegative: { id: string; score: number } | undefined;
+    for (const n of negatives) {
+      const [top] = await searchByVector(vectors.get(n.question)!, 1, null);
+      if (top && (!strongestNegative || top.score > strongestNegative.score)) strongestNegative = { id: n.id, score: top.score };
+    }
+    const fmt = (m?: { id: string; score: number }) => (m ? `${m.score.toFixed(2)} (${m.id})` : "n/a");
+    console.log(
+      `\nScore gap: weakest correct match ${fmt(weakest)}; strongest negative-case match ${fmt(strongestNegative)}; ` +
+        `MIN_SCORE ${minScore ?? "unset"}`,
+    );
+    if (weakest && strongestNegative) {
+      console.log(
+        weakest.score > strongestNegative.score
+          ? `A MIN_SCORE between ${strongestNegative.score.toFixed(2)} and ${weakest.score.toFixed(2)} keeps every correct match and drops the negative cases.`
+          : "No clean threshold: a negative case scores as high as a correct match.",
+      );
+    }
+  }
 }
 
 // Ask eval: does each answer cite the expected story, and do negative cases get "not found"?
@@ -136,7 +163,7 @@ async function runAskEval(vectors: Map<string, number[]>): Promise<void> {
   let tokensOut = 0;
   const models = new Set<string>();
   const tally = (r: AskResult) => {
-    models.add(r.model);
+    if (r.model) models.add(r.model); // empty when the chat call was skipped (no story above MIN_SCORE)
     invalid += r.invalidCitations.length;
     tokensIn += r.usage.prompt_tokens;
     tokensOut += r.usage.completion_tokens;
@@ -177,12 +204,12 @@ async function runAskEval(vectors: Map<string, number[]>): Promise<void> {
 
 try {
   const asking = flag("--ask");
-  const toEmbed = asking ? [...questions, ...negatives] : questions;
+  const toEmbed = [...questions, ...negatives]; // negatives are needed for the score-gap report too
   let vectors = new Map<string, number[]>();
   let note = "embedded server-side, no cache";
   if (mode === "direct") ({ vectors, note } = await embedQuestions(toEmbed));
 
-  console.log(`Eval${asking ? " (ask)" : ""}: ${toEmbed.length} questions, mode=${mode}, top ${TOP_K} (${note})`);
+  console.log(`Eval${asking ? " (ask)" : ""}: ${asking ? toEmbed.length : questions.length} questions, mode=${mode}, top ${TOP_K} (${note})`);
   if (mode === "direct") console.log(`Cache file: ${cachePath}`);
   console.log();
 

@@ -1,4 +1,4 @@
-# Story Search — Spec (v0.5)
+# Story Search — Spec (v0.6)
 
 *Status: milestones 1–5 are built (see §9). §§3–8 and 10 describe what is built unless marked v2.*
 
@@ -27,9 +27,9 @@ Build a small local application to learn Milvus vector search and retrieval-augm
 - Real-time document sync
 
 ## 3. User Flows
-**Search:** user types a query → backend embeds query → Milvus returns top-k chunks → page shows story title, snippet, score.
+**Search:** user types a query → backend embeds query → Milvus returns top-k chunks → page shows story title, snippet, score. Hits scoring below `MIN_SCORE` (if set) are dropped, so an unrelated query can return nothing ("No close matches").
 
-**Ask:** user types a question → backend retrieves top-k chunks → builds prompt (system instruction: answer only from context, cite story IDs like `[id]`, write plain text, and reply exactly "Not found in the collection." otherwise) → LLM returns answer → page shows answer plus source stories (cited ones marked). The citations are checked against the retrieved set.
+**Ask:** user types a question → backend retrieves top-k chunks → builds prompt (system instruction: answer only from context, cite story IDs like `[id]`, write plain text, and reply exactly "Not found in the collection." otherwise) → LLM returns answer → page shows answer plus source stories (cited ones marked). The citations are checked against the retrieved set. If no retrieved story scores above `MIN_SCORE`, the chat call is skipped and the reply is "Not found in the collection." with `noMatches: true`.
 
 **Ingest (CLI):** read story files → split into chunks → for each batch: look up stored `content_hash`es, embed only new/changed chunks, upsert into Milvus → delete rows for stories no longer in that source file (later also index into Elasticsearch).
 
@@ -45,7 +45,7 @@ A story with a title but no text is skipped with a warning; a file that yields n
 - **Vector DB:** Milvus Standalone in Docker from day one (Milvus Lite is Python-only)
 - **Keyword search (v2):** Elasticsearch in Docker
 - **Models:** OpenAI embeddings (`/v1/embeddings`); OpenAI chat model for answers via the Chat Completions API (`/v1/chat/completions`), not the Responses API (Claude is a swappable alternative for generation)
-- **Secrets and config:** `.env` file, git-ignored: `OPENAI_API_KEY`, `STORIES_DIR`, `CHAT_MODEL`; optional `STORY_HEADER_PATTERN`, `STORY_BODY_START_PATTERN` (§3) and `DOCKER_VOLUME_DIRECTORY` (§11). Anything specific to one collection is configuration, never code
+- **Secrets and config:** `.env` file, git-ignored: `OPENAI_API_KEY`, `STORIES_DIR`, `CHAT_MODEL`; optional `STORY_HEADER_PATTERN`, `STORY_BODY_START_PATTERN` (§3), `MIN_SCORE` (§7) and `DOCKER_VOLUME_DIRECTORY` (§11). Anything specific to one collection is configuration, never code
 
 ## 5. Data Model
 Milvus collection `stories`:
@@ -68,8 +68,8 @@ Elasticsearch index `stories` (v2): same `chunk_id`, `story_id`, `title` (booste
 
 ## 6. API
 - Ingest is a CLI, not an endpoint: `npm run ingest` (flags `--dry-run`, `--rebuild`, `--batch-size N`)
-- `GET /search?q=...&k=3` — returns `{query, k, results: [{chunk_id, story_id, title, snippet, score}]}`; `k` defaults to 3 (1–10), `q` is 1–500 characters; the full text and the embedding stay server-side
-- `POST /ask` `{question, k}` — same limits; returns `{answer, model, found, truncated, cited, invalidCitations, sources, usage}`: `found` is false for "Not found in the collection.", `cited` are story IDs the answer cites that were retrieved, `invalidCitations` are cited IDs that were not retrieved (should be empty), `sources` are all retrieved chunks with scores
+- `GET /search?q=...&k=3` — returns `{query, k, minScore, results: [{chunk_id, story_id, title, snippet, score}]}` (`results` may be empty when `MIN_SCORE` is set; `minScore` is null when unset); `k` defaults to 3 (1–10), `q` is 1–500 characters; the full text and the embedding stay server-side
+- `POST /ask` `{question, k}` — same limits; returns `{answer, model, found, truncated, cited, invalidCitations, sources, usage, noMatches, minScore}`: `found` is false for "Not found in the collection.", `cited` are story IDs the answer cites that were retrieved, `invalidCitations` are cited IDs that were not retrieved (should be empty), `sources` are all retrieved chunks with scores, `noMatches` is true when nothing scored above `MIN_SCORE` (no chat call; `usage` is 0)
 - `GET /` — the web page; `GET /health` — liveness check
 - `GET /search/hybrid?q=...` (v2) — RRF over Milvus + Elasticsearch
 
@@ -83,6 +83,8 @@ Elasticsearch index `stories` (v2): same `chunk_id`, `story_id`, `title` (booste
 
 *Results (milestones 3–4, `gpt-5.4-mini`, first test set):* search 10/10 in the top 3 (9 ranked first); ask 10/10 cite the expected story, 1/1 negative case answered "not found", 0 invalid citations. Factual faithfulness of the answer text is not automated; it was spot-checked by hand.
 
+*Score threshold (`MIN_SCORE`, optional):* cosine scores with `text-embedding-3-small` are low and depend on the content, so the cutoff is configuration, unset by default, and found by measurement. On the first test set, correct top-1 matches scored 0.25–0.60 and clearly unrelated queries 0.01–0.16, so 0.2 separates them. It cannot catch a plausible-sounding question the stories do not answer: the eval's negative case scores 0.36, above the weakest correct match, so the chat model handles those. `npm run eval` prints the gap (weakest correct match vs. strongest negative case) so the value can be recalibrated for any collection.
+
 ## 8. Cost Guardrails
 Expected spend is tiny (embedding the 17 first-test-set stories took 14,584 tokens, about $0.0003; each RAG question costs about $0.0035 on `gpt-5.4-mini`, roughly $0.001 on `gpt-5.4-nano`), but usage stays visible and capped.
 
@@ -93,6 +95,7 @@ Expected spend is tiny (embedding the 17 first-test-set stories took 14,584 toke
 - **Cap output:** `max_completion_tokens` = 1000 on chat calls (newer models reject `max_tokens`); `reasoning_effort: none` is sent to reasoning models so hidden reasoning tokens don't add cost
 - **No automatic retries:** OpenAI clients use `maxRetries: 0`, so a failure can't silently repeat a paid call
 - **Limit context:** default k = 3 stories per question
+- **Skip pointless chat calls:** with `MIN_SCORE` set, a question that matches nothing never reaches the chat model
 - **No needless re-embedding:** store a `content_hash` per chunk; ingest re-embeds only new or changed stories
 
 ## 9. Milestones
@@ -115,7 +118,7 @@ story-search/              # monorepo (npm workspaces)
   CLAUDE.md                # working rules for Claude Code
   package.json             # workspaces: packages/*; scripts: dev:up, dev:down, check:milvus, ingest, ingest:dry, api, eval
   tsconfig.base.json
-  .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN
+  .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN, MIN_SCORE
   .gitignore               # .env, volumes/ (Milvus data), node_modules/
   docker-compose.yml       # Milvus Standalone, Elasticsearch (later)
   scripts/
@@ -139,7 +142,7 @@ story-search/              # monorepo (npm workspaces)
     web/
       index.html           # single static page, served by the API at GET /
     eval/
-      runEval.ts           # search eval and --ask eval (direct or http mode)
+      runEval.ts           # search eval (with score-gap report) and --ask eval (direct or http mode)
 
 <private story folder>/    # STORIES_DIR, outside the repo
   *.pdf, *.txt, *.md       # story documents, any folder depth
@@ -158,3 +161,4 @@ Milvus data lives in `volumes/` under `DOCKER_VOLUME_DIRECTORY` (default: the re
 - The web page is served by the API at `GET /`; its history lives only in the page (cleared on refresh), not in `localStorage`, because answers derive from private stories
 - `.env` is loaded with Node's built-in `process.loadEnvFile` (no `dotenv`); root npm scripts call `tsx` directly so CLI flags forward
 - The project stays content-agnostic: nothing in code, prompts, UI text or docs is specific to one collection or domain. A document layout (how stories are delimited, how titles wrap) is configuration, not code; story ids are not assumed to have any particular shape and default to a slug of the title
+- A minimum similarity score (`MIN_SCORE`) is an optional setting, not a built-in constant, because scores vary with the embedding model and the content. It is set to 0.2 for the first test set; the eval reports the score gap so it can be recalibrated

@@ -77,6 +77,14 @@ STORY_BODY_START_PATTERN='...'                # only if titles can wrap over sev
 - `STORY_BODY_START_PATTERN` is a regular expression matching the first line of the body. Lines between the header and that line are added to the title. Leave it unset when titles fit on one line.
 - Wrap both in single quotes so backslashes survive.
 
+To hide weak matches, add (optional; unset means no filtering):
+
+```bash
+MIN_SCORE=0.2                                 # similarity cutoff, a number between -1 and 1
+```
+
+With it set, search returns nothing for a clearly unrelated query, and Ask skips the paid chat call. Cosine scores depend on your content, so pick the value by measurement: after ingesting, `npm run eval` prints the gap between your weakest correct match and your strongest negative case. See spec §7.
+
 Also commit a `.env.example` with the same variable names and no values.
 
 Notes:

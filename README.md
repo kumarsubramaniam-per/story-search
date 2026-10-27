@@ -44,6 +44,8 @@ Put `.pdf`, `.txt` and `.md` files anywhere under `STORIES_DIR`. Two layouts wor
 - **One story per file** (the default): the first line of the file is the story's title.
 - **Several stories per file:** set `STORY_HEADER_PATTERN` in `.env` to a regular expression that matches the line starting each story, for example `'^## (?<title>.+)$'` for markdown headings. Add `(?<id>...)` to the pattern to use your own ids. `STORY_BODY_START_PATTERN` is only needed when titles can wrap over several lines.
 
+To hide weak matches, set `MIN_SCORE` in `.env` (a number between -1 and 1; unset means no filtering). Search then returns nothing for an unrelated query, and Ask skips the paid chat call. `npm run eval` prints the score gap between your weakest correct match and the strongest negative case to help choose a value. A plausible-sounding question that your stories don't answer can still score high; the chat model handles that case.
+
 Ids are made from titles unless your pattern captures one. Run `npm run ingest:dry` first: it lists the stories it found (ids, titles, word counts) without calling any API. Details are in [SETUP.md](SETUP.md) and [spec.md](spec.md) §3.
 
 ## Commands

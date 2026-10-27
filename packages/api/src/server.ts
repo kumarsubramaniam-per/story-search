@@ -2,7 +2,7 @@ import "./env.js";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
-import { searchStories } from "./searchMilvus.js";
+import { searchStories, getMinScore } from "./searchMilvus.js";
 import { askQuestion } from "./rag.js";
 import { milvus } from "./milvus.js";
 
@@ -39,7 +39,7 @@ app.get(
     if (!q.trim()) return reply.code(400).send({ error: "q must not be blank" });
     // The full story text stays server-side; the page only needs a snippet.
     const results = (await searchStories(q, k)).map(({ text, ...hit }) => hit);
-    return { query: q, k, results };
+    return { query: q, k, minScore: getMinScore(), results };
   },
 );
 
@@ -61,7 +61,7 @@ app.post(
   async (req, reply) => {
     const { question, k } = req.body as { question: string; k: number };
     if (!question.trim()) return reply.code(400).send({ error: "question must not be blank" });
-    return askQuestion(question, k);
+    return { ...(await askQuestion(question, k)), minScore: getMinScore() };
   },
 );
 

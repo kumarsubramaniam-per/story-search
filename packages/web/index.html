@@ -136,7 +136,11 @@
 
   function renderSearch(body) {
     const box = el("div");
-    if (body.results.length === 0) box.append(el("p", "empty", "No results."));
+    if (body.results.length === 0) {
+      box.append(el("p", "notfound", body.minScore != null
+        ? `No close matches: nothing scored above the minimum of ${body.minScore}.`
+        : "No results."));
+    }
     for (const hit of body.results) {
       const row = el("div", "hit");
       const head = el("div", "card-head");
@@ -149,6 +153,10 @@
 
   function renderAsk(body) {
     const box = el("div");
+    if (body.noMatches) {
+      box.append(el("p", "notfound", `No close matches: nothing scored above the minimum of ${body.minScore}, so no answer was generated and no chat call was made.`));
+      return box;
+    }
     if (body.found) box.append(el("p", "answer", body.answer));
     else box.append(el("p", "notfound", "Not found in the collection."));
     if (body.truncated) box.append(el("p", "warn", "The answer hit the length limit and may be cut off."));
