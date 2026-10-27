@@ -1,0 +1,11 @@
+{
+  "name": "@story-search/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:milvus": "tsx src/checkMilvus.ts"
+  },
+  "dependencies": {
+    "@zilliz/milvus2-sdk-node": "^3.0.6"
+  }
+}
