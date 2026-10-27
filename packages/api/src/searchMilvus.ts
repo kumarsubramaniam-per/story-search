@@ -6,6 +6,7 @@ export type SearchHit = {
   story_id: string;
   title: string;
   snippet: string;
+  text: string; // full story text; used to build the RAG prompt, left out of /search responses
   score: number;
 };
 
@@ -41,6 +42,7 @@ export async function searchByVector(vector: number[], k: number): Promise<Searc
     story_id: h.story_id,
     title: h.title,
     snippet: String(h.text).slice(0, SNIPPET_CHARS),
+    text: String(h.text),
     score: h.score,
   }));
 }

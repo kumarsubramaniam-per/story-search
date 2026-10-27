@@ -1,6 +1,7 @@
 import "./env.js";
 import Fastify from "fastify";
 import { searchStories } from "./searchMilvus.js";
+import { askQuestion } from "./rag.js";
 import { milvus } from "./milvus.js";
 
 const DEFAULT_K = 3;
@@ -29,7 +30,31 @@ app.get(
   async (req, reply) => {
     const { q, k } = req.query as { q: string; k: number };
     if (!q.trim()) return reply.code(400).send({ error: "q must not be blank" });
-    return { query: q, k, results: await searchStories(q, k) };
+    // The full story text stays server-side; the page only needs a snippet.
+    const results = (await searchStories(q, k)).map(({ text, ...hit }) => hit);
+    return { query: q, k, results };
+  },
+);
+
+// POST /ask {question, k}  ->  answer grounded in the top-k stories, with the stories it cited
+app.post(
+  "/ask",
+  {
+    schema: {
+      body: {
+        type: "object",
+        required: ["question"],
+        properties: {
+          question: { type: "string", minLength: 1, maxLength: 500 },
+          k: { type: "integer", minimum: 1, maximum: 10, default: DEFAULT_K },
+        },
+      },
+    },
+  },
+  async (req, reply) => {
+    const { question, k } = req.body as { question: string; k: number };
+    if (!question.trim()) return reply.code(400).send({ error: "question must not be blank" });
+    return askQuestion(question, k);
   },
 );
 
