@@ -18,6 +18,7 @@ Build a small local application to learn Milvus vector search and retrieval-augm
 - Hybrid search with Reciprocal Rank Fusion (RRF)
 - Optional: compare with Milvus built-in BM25 full-text search
 - Optional: section-level chunking (Situation / Actions / Result) if story-level vectors prove too blurry
+- Future direction: generalize into a knowledge-base agent over any private document set
 
 **Out of scope**
 - Auth, multi-user, cloud deployment
