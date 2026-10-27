@@ -107,6 +107,14 @@ docker compose ps        # all three should be "running" / "healthy"
 
 Milvus listens on **localhost:19530**. Data persists in a `volumes/` folder next to the Compose file — add `volumes/` to `.gitignore`.
 
+**Keep Milvus data out of iCloud-synced folders.** If the repo lives under `~/Documents` (or `~/Desktop`) and iCloud "Desktop & Documents" sync is on, the default `./volumes` bind mount breaks: MinIO fails to write with `resource deadlock avoided`, and Milvus writes (insert/upsert) stall or time out while reads still work. Point the data at a folder outside iCloud by adding an absolute path to `.env` (the Compose file already reads this variable, so `docker-compose.yml` needs no change):
+
+```bash
+DOCKER_VOLUME_DIRECTORY=/Users/<you>/milvus-data/story-search   # absolute path; create the folder first
+```
+
+Then `./scripts/dev-down.sh --keep-docker && ./scripts/dev-up.sh` to recreate the containers. Milvus starts empty on the new location (old `./volumes` data is not migrated; re-run ingest). If the repo is already outside iCloud-synced folders, you can skip this.
+
 Common commands:
 
 ```bash

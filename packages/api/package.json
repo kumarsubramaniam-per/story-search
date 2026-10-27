@@ -3,9 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check:milvus": "tsx src/checkMilvus.ts"
+    "check:milvus": "tsx src/checkMilvus.ts",
+    "ingest": "tsx src/ingest.ts",
+    "ingest:dry": "tsx src/ingest.ts --dry-run"
   },
   "dependencies": {
-    "@zilliz/milvus2-sdk-node": "^3.0.6"
+    "@zilliz/milvus2-sdk-node": "^3.0.6",
+    "js-tiktoken": "^1.0.21",
+    "openai": "^7.45.1",
+    "pdfjs-dist": "^6.4.299"
   }
 }

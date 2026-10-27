@@ -8,7 +8,9 @@
   "scripts": {
     "dev:up": "./scripts/dev-up.sh",
     "dev:down": "./scripts/dev-down.sh",
-    "check:milvus": "npm run check:milvus -w @story-search/api"
+    "check:milvus": "npm run check:milvus -w @story-search/api",
+    "ingest": "npm run ingest -w @story-search/api",
+    "ingest:dry": "npm run ingest:dry -w @story-search/api"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
