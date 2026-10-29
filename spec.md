@@ -1,4 +1,4 @@
-# Story Search — Spec (v0.6)
+# Story Search — Spec (v0.7)
 
 *Status: milestones 1–5 are built (see §9). §§3–8 and 10 describe what is built unless marked v2.*
 
@@ -116,6 +116,7 @@ story-search/              # monorepo (npm workspaces)
   spec.md
   SETUP.md                 # one-time prework: Docker, Milvus, .env, OpenAI key, story folder
   CLAUDE.md                # working rules for Claude Code
+  sdd-journey.md           # the author's own build story, for publishing (Claude Code leaves it alone unless asked)
   package.json             # workspaces: packages/*; scripts: dev:up, dev:down, check:milvus, ingest, ingest:dry, api, eval
   tsconfig.base.json
   .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN, MIN_SCORE
