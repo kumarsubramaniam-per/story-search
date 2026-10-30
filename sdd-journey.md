@@ -5,7 +5,7 @@ I wanted to learn vector search and RAG by building something real, not by readi
 This is the story of how that went, all seven milestones, including the parts that went wrong.
 
 ## Why this project
-I wanted hands-on time with Milvus and with the full RAG loop: chunk, embed, store, search, then ask a model to answer only from what was retrieved. The longer-term goal is a knowledge-base agent with hybrid search (vector plus keyword), but I decided to add one new system at a time. So version one is Milvus and RAG, and Elasticsearch comes later.
+I wanted hands-on time with Milvus and with the full RAG loop: chunk, embed, store, search, then ask a model to answer only from what was retrieved. The goal is a knowledge-base agent with hybrid search (vector plus keyword), but I decided to add one new system at a time. So I started with Milvus and RAG, and added Elasticsearch and hybrid search once that worked (milestones 6 and 7).
 
 ## The approach: spec first, code second
 Spec-driven development, for me, meant working in a fixed order: **understand, specify, set up, plan, build, verify**, one milestone at a time.
@@ -13,7 +13,7 @@ Spec-driven development, for me, meant working in a fixed order: **understand, s
 | Phase | What I did | What it produced |
 |---|---|---|
 | 1. Learn the concepts | Asked questions before deciding anything: chunking, embeddings, the RAG flow, HNSW vs FLAT indexes, hybrid search and reciprocal rank fusion, Fastify vs Express, costs | A mental model of the moving parts |
-| 2. Write the spec | Goal, scope (v1, v2, out), user flows, architecture, data model, API, success criteria, cost guardrails, milestones, repo layout and decisions. I iterated from v0.1 to v0.3 and turned every open question into a recorded decision | `spec.md` |
+| 2. Write the spec | Goal, scope (first version, later, out), user flows, architecture, data model, API, success criteria, cost guardrails, milestones, repo layout and decisions. I iterated from v0.1 to v0.3 and turned every open question into a recorded decision | `spec.md` |
 | 3. Define "done" before code | Wrote about 10 evaluation questions, worded differently from the source documents, each with an expected answer. I added tricky near-neighbours, an exact-term query and a question the documents can't answer | `questions.json`, kept out of git |
 | 4. Do the prework by hand | Docker, Milvus Standalone, an OpenAI project with a restricted key and a budget, `.env`, and a private data folder. I wrote down every step as I went | `SETUP.md`, `scripts/dev-up.sh`, `scripts/dev-down.sh` |
 | 5. Set rules for the AI | One milestone at a time, a plan before any code, ask before installing anything, protected files, how to handle secrets, the stack conventions | `CLAUDE.md` |
@@ -42,7 +42,7 @@ These came from questions I asked while reviewing, not from the first spec:
 - **Added two standing rules to `CLAUDE.md`:** keep `spec.md` current after every milestone, and keep the code free of anything specific to one dataset.
 - **Made the web controls explain themselves.** The Search/Ask and Vector/Keyword/Hybrid options sat in one row with no separation, so I asked for outlined boxes and a line of sub-text under the chosen option saying what it will do. I also caught that "No OpenAI call" under Keyword would mislead when Ask is selected, because Ask with keyword search still calls the model for the answer.
 - **Added a screenshot to the README,** drawn from the real page with invented sample stories, so nothing private can leak into the repo.
-- **Picked the Elasticsearch version myself.** The AI first proposed 9.5.1, but newer patch releases of the older line existed, so I chose 9.4.8 and the matching client.
+- **Picked the Elasticsearch version myself.** The AI proposed 9.5.1. I asked whether it was stable enough and went with 9.4.8 and the matching 9.4 client.
 - **Asked the basic questions before milestone 6:** what is RRF, and what is `ELASTICSEARCH_URL` for? They led to one endpoint with a `mode` parameter and a rule that the code must keep working with Elasticsearch unset.
 
 ## Decisions that shaped it
@@ -50,7 +50,7 @@ These came from questions I asked while reviewing, not from the first spec:
 - **Milvus Standalone in Docker** from day one, because Milvus Lite is Python-only.
 - **FLAT index with cosine similarity:** exact search is fine for a tiny corpus. HNSW can come later as a learning exercise.
 - **One chunk per story.** I'll only move to section-level chunking if the vectors turn out too blurry.
-- **Vector search and RAG first, Elasticsearch hybrid as v2,** one new system at a time.
+- **Vector search and RAG first, then Elasticsearch and hybrid search as milestones 6 and 7,** one new system at a time.
 - **Data outside the repo** (`STORIES_DIR`), with a restricted API key (Chat Completions and Embeddings only) and a budget cap.
 - **Content-agnostic through configuration, not code.** A "story" is any self-contained piece of content small enough to embed. Files can be `.pdf`, `.txt` or `.md`. By default one file is one story, and a regular expression in `.env` splits a file into many. Ids come from the title unless the pattern captures one. Nothing about my own documents' layout lives in the code.
 - **Chat model: `gpt-5.4-mini`.** `gpt-5.4-nano` passed the same eval for about a third of the cost, but its docs page marks it deprecated, so it stays a one-line `.env` switch.
@@ -85,7 +85,7 @@ These came from questions I asked while reviewing, not from the first spec:
 **What I got wrong about search**
 - **I expected keyword search to lose on paraphrased questions.** I had worded the eval questions differently from the documents on purpose. Keyword search still found the right story in the top 3 for 10 of 10. The English analyzer and the title weighting did more than I guessed.
 - **I expected hybrid to return nothing for an unrelated query.** The vector side was cut off by `MIN_SCORE`, but the keyword side has no cutoff, so a weak word match slipped through. A score cutoff on the keyword list is a known gap, and I left it open.
-- **Hybrid only tied vector on my test set** (MRR@10 0.950 each). Ten questions about 17 stories can't show the exact-term advantage hybrid is meant to have, so I can't claim it yet.
+- **Hybrid only tied vector on my test set** (MRR@10 0.950 each). Ten questions about 17 stories can't show the exact-term advantage hybrid is meant to have: even my one exact-term question was answered correctly by all three methods. So I can't claim it yet.
 - **RRF can bury a confident vector match.** I tried a conversational question with a typo in it. Vector search had the right story first, but the keyword side ranked it low, and after fusion it dropped to around seventh. RRF uses ranks and throws away how large the score margin was. I also asked why the answer cited a story with a lower RRF score than other retrieved ones. The answer was that RRF only orders the results, and the model chooses what to cite from all of them. I decided not to add a fix yet and wrote the limit into the spec.
 
 ## What worked well
@@ -105,10 +105,9 @@ These came from questions I asked while reviewing, not from the first spec:
 | | |
 |---|---|
 | Stories in the test set | 17, about 700 words each |
-| Search: expected story in the top 3 | 10 of 10 (9 ranked first) |
+| Search: expected story in the top 3 | 10 of 10 for vector, keyword and hybrid (vector ranks 9 first) |
 | Ask: answer cites the expected story | 10 of 10; the "not found" case correct; no bad citations |
 | Embedding all the stories | 14,584 tokens, about $0.0003 |
-| Search quality, expected story in the top 3 | 10 of 10 for vector, keyword and hybrid |
 | Search quality, MRR@10 (higher is better, 1.0 is perfect) | Hybrid 0.950, vector 0.950, keyword 0.883 |
 | One question (search only) | One tiny embedding call, almost free; keyword search makes no OpenAI call at all |
 | One question (ask) | One embedding plus one chat call: about $0.0035 with `gpt-5.4-mini`, about $0.001 with nano |
