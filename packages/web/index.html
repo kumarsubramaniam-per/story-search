@@ -127,7 +127,7 @@
   const METHOD_SUB = {
     vector: "Turns your query into an embedding, a list of numbers for its meaning, and finds the closest stories in Milvus. Finds paraphrases.",
     keyword: "Matches the words in your query against the stories in Elasticsearch (BM25); words found in a story's title count for more than words in its text. Finding the stories needs no OpenAI call. Best for exact terms.",
-    hybrid: "Runs both searches and merges their rankings (reciprocal rank fusion). Arrives in milestone 7.",
+    hybrid: "Runs both searches and merges their rankings with reciprocal rank fusion (RRF), so stories both methods like rise to the top. The merge is plain code, not an LLM.",
   };
   // The OpenAI calls one click makes: an embedding for vector or hybrid, plus a chat call for Ask.
   function callsText(action, method) {
@@ -149,10 +149,12 @@
   updateControls();
 
   // Scores mean different things per method, so label them: cosine similarity is 0 to 1, BM25 has no upper limit.
-  function scoreText(method, score) {
+  // Hybrid also shows where the story ranked in each search it came from, e.g. "vector #2 · keyword #1".
+  function scoreText(method, score, ranks) {
     if (method === "vector") return `similarity ${score.toFixed(3)}`;
     if (method === "keyword") return `BM25 ${score.toFixed(2)}`;
-    return `score ${score.toFixed(4)}`;
+    const where = ranks ? Object.entries(ranks).map(([name, rank]) => `${name} #${rank}`).join(" · ") : "";
+    return `RRF ${score.toFixed(4)}${where ? " · " + where : ""}`;
   }
 
   // Ask the server which methods are set up and disable the others.
@@ -164,7 +166,8 @@
         keyword: "By the words you type (BM25)",
         hybrid: "Both combined",
       };
-      const reasons = { keyword: "Needs ELASTICSEARCH_URL in .env and Elasticsearch running", hybrid: "Arrives in milestone 7" };
+      const needsEs = "Needs ELASTICSEARCH_URL in .env and Elasticsearch running";
+      const reasons = { keyword: needsEs, hybrid: needsEs };
       for (const method of ["vector", "keyword", "hybrid"]) {
         const label = document.getElementById(`m-${method}`);
         const available = Boolean(health.modes && health.modes[method]);
@@ -205,6 +208,7 @@
 
   function noMatchText(body) {
     if (body.mode === "keyword") return "No keyword matches for these words.";
+    if (body.mode === "hybrid") return "No matches from either search.";
     return body.minScore != null ? `No close matches: nothing scored above the minimum of ${body.minScore}.` : "No results.";
   }
 
@@ -214,7 +218,7 @@
     for (const hit of body.results) {
       const row = el("div", "hit");
       const head = el("div", "card-head");
-      head.append(el("span", "badge", hit.story_id), el("strong", "", hit.title), el("span", "meta", scoreText(body.mode, hit.score)));
+      head.append(el("span", "badge", hit.story_id), el("strong", "", hit.title), el("span", "meta", scoreText(body.mode, hit.score, hit.ranks)));
       row.append(head, el("p", "", hit.snippet.length >= 300 ? hit.snippet + "…" : hit.snippet));
       box.append(row);
     }
@@ -237,7 +241,7 @@
       const row = el("div", "hit");
       const head = el("div", "card-head");
       head.append(el("span", "badge" + (body.cited.includes(s.story_id) ? " cited" : ""), s.story_id), el("strong", "", s.title));
-      head.append(el("span", "meta", `${scoreText(body.mode, s.score)}${body.cited.includes(s.story_id) ? " · cited" : ""}`));
+      head.append(el("span", "meta", `${scoreText(body.mode, s.score, s.ranks)}${body.cited.includes(s.story_id) ? " · cited" : ""}`));
       row.append(head);
       box.append(row);
     }

@@ -7,7 +7,8 @@ export type SearchHit = {
   title: string;
   snippet: string;
   text: string; // full story text; used to build the RAG prompt, left out of /search responses
-  score: number;
+  score: number; // meaning depends on the mode: cosine similarity, BM25, or the RRF sum
+  ranks?: { vector?: number; keyword?: number }; // hybrid only: the story's rank in each list it appeared in
 };
 
 const SNIPPET_CHARS = 300;

@@ -1,6 +1,6 @@
 # CLAUDE.md — story-search
 
-Local learning project: semantic search and RAG over a private collection of documents ("stories"), using Milvus (vector DB) and OpenAI, with Elasticsearch hybrid search in v2. The project is content-agnostic (see "Keep it generic").
+Local learning project: semantic search and RAG over a private collection of documents ("stories"), using Milvus (vector DB) and OpenAI, with optional Elasticsearch keyword search and hybrid search (RRF). The project is content-agnostic (see "Keep it generic").
 
 - **What to build:** `spec.md` is the source of truth (scope, data model, API, milestones, decisions).
 - **Environment setup:** `SETUP.md` (Docker, Milvus, `.env`, OpenAI key). The prework is already done when you start.
@@ -53,7 +53,7 @@ Anyone should be able to use this project for their own content by setting envir
 - **Backend:** Fastify (`packages/api`).
 - **Env loading:** one root `.env`, loaded by explicit path (npm workspace scripts run from inside each package folder, so default `dotenv` lookup won't find it).
 - **Milvus:** `@zilliz/milvus2-sdk-node`, server at `localhost:19530`. Collection `stories`, schema per spec §5. Index **FLAT**, metric **COSINE**.
-- **Elasticsearch (optional keyword search):** `@elastic/elasticsearch` 9.4.x against the 9.4.8 container, enabled by `ELASTICSEARCH_URL`. Index `stories`, same `chunk_id`s as Milvus. Local only: security is off and the port is bound to `127.0.0.1`. Search method is a `mode` (`vector`, `keyword`, later `hybrid`); keep the code working with Elasticsearch unset.
+- **Elasticsearch (optional keyword search):** `@elastic/elasticsearch` 9.4.x against the 9.4.8 container, enabled by `ELASTICSEARCH_URL`. Index `stories`, same `chunk_id`s as Milvus. Local only: security is off and the port is bound to `127.0.0.1`. Search method is a `mode` (`vector`, `keyword`, or `hybrid`, which fuses both with reciprocal rank fusion in `fusion.ts`); keep the code working with Elasticsearch unset.
 - **Embeddings:** `text-embedding-3-small`, 1536 dimensions, one chunk per story.
 - **Generation:** OpenAI **Chat Completions API** (`/v1/chat/completions`), model from `CHAT_MODEL`. Do **not** use the Responses API; the project's API key is restricted to Chat Completions and Embeddings only.
 - **Defaults:** k = 3.
@@ -78,5 +78,5 @@ npm run check:milvus         # connect to Milvus and print its version
 npm run ingest:dry           # parse and chunk only; no OpenAI or Milvus calls
 npm run ingest -- [--rebuild] [--batch-size N]   # embed new/changed stories into Milvus
 npm run api                  # Fastify server + web page at http://127.0.0.1:3000
-npm run eval -- [--ask] [--mode vector|keyword] [--via http] [--no-cache]   # search eval; --ask makes paid chat calls
+npm run eval -- [--ask] [--mode vector|keyword|hybrid] [--compare] [--pool N] [--via http] [--no-cache]   # search eval; --compare = 3 methods side by side; --ask makes paid chat calls
 ```

@@ -13,7 +13,7 @@ const DEFAULT_K = 3;
 // Fail at startup, not on the first request, if SEARCH_MODE is invalid or names a mode this setup can't serve.
 const fallbackMode = defaultMode();
 if (!availableModes()[fallbackMode]) {
-  throw new Error(`SEARCH_MODE=${fallbackMode} is not available: keyword needs ELASTICSEARCH_URL; hybrid arrives in milestone 7.`);
+  throw new Error(`SEARCH_MODE=${fallbackMode} is not available: keyword and hybrid need ELASTICSEARCH_URL.`);
 }
 
 // Request logging is off: the URL would put the user's query text in the logs. Embedding usage is logged in embed.ts.
@@ -51,8 +51,8 @@ app.get(
     if (!q.trim()) return reply.code(400).send({ error: "q must not be blank" });
     // The full story text stays server-side; the page only needs a snippet.
     const results = (await search(q, k, mode)).map(({ text, ...hit }) => hit);
-    // MIN_SCORE is a cosine threshold, so it applies to vector results only.
-    return { query: q, k, mode, minScore: mode === "vector" ? getMinScore() : null, results };
+    // MIN_SCORE is a cosine threshold: it applies to vector results, including the vector side of hybrid.
+    return { query: q, k, mode, minScore: mode === "keyword" ? null : getMinScore(), results };
   },
 );
 
@@ -76,7 +76,7 @@ app.post(
     const { question, k, mode = fallbackMode } = req.body as { question: string; k: number; mode?: SearchMode };
     if (!question.trim()) return reply.code(400).send({ error: "question must not be blank" });
     const result = await askQuestion(question, k, undefined, mode);
-    return { ...result, minScore: mode === "vector" ? getMinScore() : null };
+    return { ...result, minScore: mode === "keyword" ? null : getMinScore() };
   },
 );
 

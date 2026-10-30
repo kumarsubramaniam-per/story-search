@@ -1,6 +1,6 @@
-# Story Search — Spec (v0.9)
+# Story Search — Spec (v1.0)
 
-*Status: milestones 1–6 are built (see §9). §§3–8 and 10 describe what is built unless marked v2.*
+*Status: milestones 1–7 are built (see §9). §§3–8 and 10 describe what is built.*
 
 ## 1. Goal
 Build a small local application to learn Milvus vector search and retrieval-augmented generation (RAG) over a private collection of short documents. The project is content-agnostic: a **story** is any self-contained piece of content small enough to embed as one chunk (an article, note, FAQ entry, Q&A, case study…). The first test set is ~20–30 stories of ~700 words each. Later, add Elasticsearch keyword search and fuse both result sets (hybrid search).
@@ -11,13 +11,12 @@ Build a small local application to learn Milvus vector search and retrieval-augm
 - Embed chunks with OpenAI `text-embedding-3-small` (1536 dims)
 - Store vectors + text + metadata in Milvus
 - Semantic search endpoint (top-k stories)
-- Optional Elasticsearch BM25 keyword index over the same chunks; the search method (vector, keyword, later hybrid) is chosen per request
+- Optional Elasticsearch BM25 keyword index over the same chunks; the search method (vector, keyword, hybrid) is chosen per request; hybrid fuses the two rankings with reciprocal rank fusion (RRF)
 - Ask endpoint: retrieve top-k, send to LLM, answer grounded only in retrieved context, with cited story IDs
 - Minimal web page calling the backend (Search/Ask toggle, search-method control, in-page history)
 - Run everything locally on Mac
 
-**Later (v2)**
-- Hybrid search with Reciprocal Rank Fusion (RRF)
+**Later (optional)**
 - Optional: compare with Milvus built-in BM25 full-text search
 - Optional: section-level chunking if story-level vectors prove too blurry
 - Future direction: generalize into a knowledge-base agent over any private document set
@@ -30,7 +29,7 @@ Build a small local application to learn Milvus vector search and retrieval-augm
 **Search:** user types a query and picks a search method (`mode`):
 - **vector:** backend embeds the query → Milvus returns the top-k chunks by meaning. Hits scoring below `MIN_SCORE` (if set) are dropped, so an unrelated query can return nothing ("No close matches").
 - **keyword:** Elasticsearch BM25 over title and text (a title match counts 3×); no embedding call. Needs `ELASTICSEARCH_URL`.
-- **hybrid** (v2, milestone 7): both, fused with RRF.
+- **hybrid:** the vector and keyword searches run at the same time, each returning a pool of candidates (at least 20, or 3× k). Their two rankings are merged by reciprocal rank fusion: a story earns `1 / (60 + rank)` from every list it appears in, the earnings are added, and the top k are kept. Only ranks are used, so cosine and BM25 scores need not be comparable, and the merge is plain code, not an LLM. A story liked by both methods rises above one ranked first by only one. `MIN_SCORE` trims the vector list before fusing; the keyword list has no threshold. The page shows each story's rank in each list ("vector #2 · keyword #1"). It costs the same as vector search: one embedding call.
 
 The page shows story title, snippet and score, labelled by method (cosine similarity is 0–1; BM25 has no upper limit, so the two scores are not comparable). If `mode` is omitted, `SEARCH_MODE` applies (default `vector`).
 
@@ -73,23 +72,33 @@ Elasticsearch index `stories` (when `ELASTICSEARCH_URL` is set): one document pe
 
 ## 6. API
 - Ingest is a CLI, not an endpoint: `npm run ingest` (flags `--dry-run`, `--rebuild`, `--batch-size N`)
-- `GET /search?q=...&k=3&mode=vector|keyword|hybrid` — returns `{query, k, mode, minScore, results: [{chunk_id, story_id, title, snippet, score}]}`; `mode` defaults to `SEARCH_MODE` (default `vector`); `results` may be empty (vector: below `MIN_SCORE`; keyword: no match); `minScore` applies to vector mode only and is null otherwise or when unset; `k` defaults to 3 (1–10), `q` is 1–500 characters; the full text and the embedding stay server-side
+- `GET /search?q=...&k=3&mode=vector|keyword|hybrid` — returns `{query, k, mode, minScore, results: [{chunk_id, story_id, title, snippet, score}]}`; `mode` defaults to `SEARCH_MODE` (default `vector`); `results` may be empty (vector: below `MIN_SCORE`; keyword: no match; hybrid: neither search found anything); in hybrid mode `score` is the RRF sum and each result has `ranks` (its rank in each list it appeared in); `minScore` applies to vector mode and to the vector side of hybrid, and is null for keyword or when unset; `k` defaults to 3 (1–10), `q` is 1–500 characters; the full text and the embedding stay server-side
 - `POST /ask` `{question, k, mode}` — same limits; returns `{answer, model, mode, found, truncated, cited, invalidCitations, sources, usage, noMatches, minScore}`: `found` is false for "Not found in the collection.", `cited` are story IDs the answer cites that were retrieved, `invalidCitations` are cited IDs that were not retrieved (should be empty), `sources` are all retrieved chunks with scores, `noMatches` is true when retrieval found nothing (no chat call; `usage` is 0)
-- Mode errors: an unknown `mode` is a 400; `keyword` without `ELASTICSEARCH_URL` is a 400 naming the setting; `hybrid` is a 501 until milestone 7. The server refuses to start if `SEARCH_MODE` is invalid or not available
+- Mode errors: an unknown `mode` is a 400; `keyword` or `hybrid` without `ELASTICSEARCH_URL` is a 400 naming the setting. The server refuses to start if `SEARCH_MODE` is invalid or not available
 - `GET /` — the web page; `GET /health` — `{ok, modes: {vector, keyword, hybrid}, defaultMode}`, which the page uses to disable methods that aren't set up
-- Hybrid search (v2) is `mode=hybrid` on the same endpoints (RRF over Milvus + Elasticsearch), not a separate route
+- Hybrid search is `mode=hybrid` on the same endpoints (RRF over Milvus + Elasticsearch), not a separate route
 
 ## 7. Success Criteria
 - Evaluation set of ~10 questions phrased differently from the stories, each with an expected story
 - Search: expected story in top 3 for at least 8 of 10
 - Ask: answers cite the correct story and don't invent facts outside the context
-- v2: hybrid beats or matches vector-only on the same set, and wins on exact-term queries (e.g. product names)
+- Hybrid: beats or matches vector-only on the same set, and wins on exact-term queries (e.g. product names)
 
 *Eval set:* `questions.json` lives in `STORIES_DIR` (not the repo); it has `questions` (`id`, `question`, `expected_story_id`, `tests`) and `negative_cases` the stories cannot answer. `npm run eval` checks search; `npm run eval -- --ask` checks answers (cites the expected story; negative cases answer "not found"; no invalid citations) and makes paid chat calls. `--mode vector|keyword` picks the search method (default `vector`) and `--via direct|http` picks how it runs (in-process, or against a running server).
 
 *Results (milestones 3–4, `gpt-5.4-mini`, first test set):* search 10/10 in the top 3 (9 ranked first); ask 10/10 cite the expected story, 1/1 negative case answered "not found", 0 invalid citations. The ask eval was re-run after the content-agnostic prompt and `MIN_SCORE=0.2` with the same result (about 29,900 prompt and 1,560 completion tokens, roughly $0.029 for the 11 calls). Factual faithfulness of the answer text is not automated; it was spot-checked by hand.
 
-*Keyword baseline (milestone 6, `english` analyzer, first test set):* 10/10 in the top 3 (8 ranked first), no OpenAI calls. The two methods differ most on the exact-term acronym question: keyword puts the right story at 3.58 against 0.76 for the runner-up, while vector scores it 0.25 against 0.22. Keyword scores are BM25 values, not comparable with cosine scores, so `MIN_SCORE` applies to vector mode only. A keyword ask was spot-checked (cited the right story, no embedding call).
+*Keyword baseline (milestone 6, `english` analyzer, first test set):* 10/10 in the top 3 (8 ranked first), no OpenAI calls. The two methods differ most on the exact-term acronym question: keyword puts the right story at 3.58 against 0.76 for the runner-up, while vector scores it 0.25 against 0.22. Keyword scores are BM25 values, not comparable with cosine scores, so `MIN_SCORE` applies to vector results only (vector mode, and the vector side of hybrid). A keyword ask was spot-checked (cited the right story, no embedding call).
+
+*Hybrid comparison (milestone 7, first test set):* `npm run eval -- --compare` ranks the expected story in each method (depth 10, no OpenAI cost):
+
+| | vector | keyword | hybrid |
+|---|---|---|---|
+| in the top 3 | 10/10 | 10/10 | 10/10 |
+| ranked first | 9/10 | 8/10 | 9/10 |
+| MRR@10 | 0.950 | 0.883 | 0.950 |
+
+Hybrid matches vector-only and beats keyword-only, so the first criterion holds, but it does not beat vector overall. Fusion fixed one question (q01: 2nd in both lists, 1st fused) and cost another (q07: 1st by vector but 3rd by keyword, so a story ranked 1st and 4th lost narrowly, 0.0325 to 0.0323). It also did not "win" on the exact-term acronym question: all three methods rank the right story first there, so rank alone cannot show keyword's much larger score margin (3.58 vs 0.76 against vector's 0.25 vs 0.22). Ten questions with one exact-term case is too small to show that criterion; more exact-term questions in `questions.json` would. The candidate pool made no difference (`--pool` 10, 20 and 100 give identical results) because a 17-story collection fits inside every pool; it would matter on a larger one. A keyword search has no score threshold, so incidental words can produce weak keyword-only hits that hybrid passes through (an unrelated query matched two stories at BM25 about 1.9, against 16 for a real hit); the chat model still answers "not found" for those in Ask.
 
 *Score threshold (`MIN_SCORE`, optional):* cosine scores with `text-embedding-3-small` are low and depend on the content, so the cutoff is configuration, unset by default, and found by measurement. On the first test set, correct top-1 matches scored 0.25–0.60 and clearly unrelated queries 0.01–0.16, so 0.2 separates them (the search eval is unchanged at 0.2: 10/10 in the top 3, 9 ranked first). It cannot catch a plausible-sounding question the stories do not answer: the eval's negative case scores 0.36, above the weakest correct match, so the chat model handles those. `npm run eval` prints the gap (weakest correct match vs. strongest negative case) so the value can be recalibrated for any collection.
 
@@ -105,6 +114,7 @@ Expected spend is tiny (embedding the 17 first-test-set stories took 14,584 toke
 - **Limit context:** default k = 3 stories per question
 - **Skip pointless chat calls:** a question that retrieves nothing (below `MIN_SCORE`, or no keyword match) never reaches the chat model
 - **Keyword work is free:** Elasticsearch indexing and keyword search make no OpenAI calls, and ingest checks Elasticsearch is reachable before any paid embedding call
+- **Hybrid costs the same as vector:** one embedding call; the fusion is plain code, and only the final top k reach the prompt
 - **No needless re-embedding:** store a `content_hash` per chunk; ingest re-embeds only new or changed stories
 
 ## 9. Milestones
@@ -114,7 +124,7 @@ Expected spend is tiny (embedding the 17 first-test-set stories took 14,584 toke
 4. Ask endpoint (RAG) — **done**
 5. Web page — **done**
 6. Elasticsearch indexing — **done** (keyword mode, mode parameter, page method control)
-7. Hybrid search with RRF + compare results
+7. Hybrid search with RRF + compare results — **done** (`mode=hybrid`, per-method ranks on the page, `--compare` eval)
 
 *Between milestones 5 and 6 the code was made content-agnostic (document layout and ids moved from code to configuration; see §3, §5, §11).*
 
@@ -148,14 +158,14 @@ story-search/              # monorepo (npm workspaces)
       src/ingest.ts        # ingest CLI
       src/searchMilvus.ts  # vector search (MIN_SCORE)
       src/searchEs.ts      # Elasticsearch: index, bulk indexing, stale delete, keyword (BM25) search
-      src/search.ts        # search modes: picks vector or keyword (hybrid in milestone 7), mode errors
+      src/search.ts        # search modes: vector, keyword or hybrid (runs both, then fuses), candidate pool, mode errors
       src/rag.ts           # ask: retrieve (by mode) -> prompt -> Chat Completions -> citation check
       src/server.ts        # Fastify routes; also serves the web page
-      src/fusion.ts        # v2 (milestone 7): RRF
+      src/fusion.ts        # reciprocal rank fusion (RRF)
     web/
       index.html           # single static page, served by the API at GET /
     eval/
-      runEval.ts           # search eval (with score-gap report) and --ask eval; --mode vector|keyword, --via direct|http
+      runEval.ts           # search eval (score-gap report), --ask eval, --compare table; --mode vector|keyword|hybrid, --pool N, --via direct|http
 
 <private story folder>/    # STORIES_DIR, outside the repo
   *.pdf, *.txt, *.md       # story documents, any folder depth
@@ -179,3 +189,6 @@ Milvus and Elasticsearch data live in `volumes/` under `DOCKER_VOLUME_DIRECTORY`
 - Elasticsearch is optional (`ELASTICSEARCH_URL`). When set, ingest indexes every chunk on every run instead of comparing hashes, because indexing is free and this fills a newly started Elasticsearch without re-embedding; if it is set but unreachable, ingest stops before any paid call
 - Keyword analyzer: `english` by default, as a setting (`ELASTICSEARCH_ANALYZER`) because the project is content-agnostic; a change recreates only the Elasticsearch index. Fuzzy matching was left out: vector search already tolerates typos, and it adds noise on short exact terms
 - One `/search` and `/ask` with a `mode` parameter (vector, keyword, hybrid) replaces the separate `/search/hybrid` route planned in §6 v0.7; `SEARCH_MODE` sets the default. In the eval, `--mode` is the search method and `--via` is how it runs
+- Hybrid fusion: reciprocal rank fusion with the standard constant 60, fixed in code rather than a setting, because it needs no tuning and the project has no data to tune it on. Each search contributes a candidate pool of at least 20, or 3× k, so a story ranked 4th by both methods can still win, while weak agreement deep in both lists does not outweigh one method's strong match (RRF is gentle with depth: rank 1 earns 0.0164, rank 20 earns 0.0125). The eval's `--pool` flag lets the effect be measured
+- In hybrid mode `MIN_SCORE` trims only the vector candidates before fusing, so an unrelated query is not lifted by a weak vector hit. The keyword list has no threshold (BM25 scores depend on the corpus), so weak keyword-only hits can pass through; a keyword score cutoff was left out until it is shown to be needed
+- The page shows each hybrid result's rank in each list (for example "vector #2 · keyword #1") so a learner can see why a story landed where it did, and `npm run eval -- --compare` prints the three methods' ranks side by side, with top-3 counts, first-place counts and MRR@10

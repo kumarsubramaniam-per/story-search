@@ -1,6 +1,6 @@
 # story-search
 
-A local learning project: semantic search and retrieval-augmented generation (RAG) over a private collection of documents, using Milvus (vector database) and OpenAI. Optional keyword search with Elasticsearch is built in; hybrid search (vector plus keyword) is next.
+A local learning project: semantic search and retrieval-augmented generation (RAG) over a private collection of documents, using Milvus (vector database) and OpenAI. Optional keyword search with Elasticsearch and hybrid search (both fused with reciprocal rank fusion) are built in.
 
 It works with any content you can split into **stories**: self-contained pieces small enough to embed as one chunk, such as articles, notes, FAQ entries, Q&As or case studies. Point it at a folder of `.pdf`, `.txt` or `.md` files and configure a few environment variables.
 
@@ -11,7 +11,7 @@ Everything runs locally on a Mac. Your documents stay outside this repo.
 
 ![The Story Search web page: an Ask answer with cited sources, and a keyword search result](docs/screenshot.png)
 
-*The web page, shown with made-up sample stories: an Ask answer using vector search, and a keyword search with BM25 scores.*
+*The web page, shown with made-up sample stories: an Ask answer using hybrid search (each source shows its RRF score and its rank in each search), and a keyword search with BM25 scores.*
 
 ## Docs
 
@@ -59,9 +59,9 @@ Every search and ask takes a `mode`:
 |---|---|---|
 | `vector` (default) | meaning, using embeddings stored in Milvus | Milvus and OpenAI embeddings |
 | `keyword` | the words in your query (BM25), with English word-form matching by default | Elasticsearch (`ELASTICSEARCH_URL` in `.env`) |
-| `hybrid` | both, fused with reciprocal rank fusion | milestone 7 |
+| `hybrid` | both at once, with their rankings merged by reciprocal rank fusion (RRF) | everything vector and keyword need |
 
-Keyword search makes no OpenAI call, and vector search is better at paraphrases. Keyword is better at exact terms like acronyms and product names. The web page has a Vector / Keyword / Hybrid control that is disabled for modes that aren't set up. Turn keyword search on with `ELASTICSEARCH_URL`, then run `npm run ingest`; no re-embedding is needed. Set `SEARCH_MODE` to change the default. See [SETUP.md](SETUP.md) for the container and the analyzer setting.
+Keyword search makes no OpenAI call, and vector search is better at paraphrases. Keyword is better at exact terms like acronyms and product names. Hybrid runs both and merges their rankings, so a story both methods like rises above one that only a single method ranked first. The merge is plain code, not an LLM, and hybrid costs the same as vector. The web page has a Vector / Keyword / Hybrid control that is disabled for modes that aren't set up. Turn keyword search on with `ELASTICSEARCH_URL`, then run `npm run ingest`; no re-embedding is needed. Set `SEARCH_MODE` to change the default. See [SETUP.md](SETUP.md) for the container and the analyzer setting.
 
 ## Commands
 
@@ -72,7 +72,8 @@ Keyword search makes no OpenAI call, and vector search is better at paraphrases.
 | `npm run ingest:dry` | Parse and chunk the files; prints story ids, titles and word counts |
 | `npm run ingest -- [--rebuild] [--batch-size N]` | Embed new or changed stories into Milvus, and index all stories into Elasticsearch if enabled; `--rebuild` drops the collection (and the index) first |
 | `npm run api` | Fastify server plus the web page, on 127.0.0.1:3000 |
-| `npm run eval -- [--mode vector\|keyword] [--via http] [--no-cache]` | Search eval: is the expected story in the top 3? `--mode` picks the method, `--via http` runs it against the server |
+| `npm run eval -- [--mode vector\|keyword\|hybrid] [--via http] [--no-cache]` | Search eval: is the expected story in the top 3? `--mode` picks the method, `--via http` runs it against the server |
+| `npm run eval -- --compare [--pool N]` | Runs vector, keyword and hybrid side by side and prints where each ranks the expected story, with top-3 counts and MRR. No OpenAI cost. `--pool` sets the hybrid candidate pool |
 | `npm run eval -- --ask` | Answer eval: does each answer cite the expected story? **Makes paid chat calls** |
 
 Ingest re-embeds only stories whose `content_hash` changed, so rerunning it is cheap. The evals read `questions.json` from `STORIES_DIR` (format in [spec.md](spec.md) §7).
@@ -112,4 +113,4 @@ The full tree is in [spec.md](spec.md) §10.
 
 ## Status
 
-Milestones 1–6 are done: setup, ingest, search with eval, ask, the web page, and Elasticsearch keyword search with a per-request search mode. Next: hybrid search with reciprocal rank fusion, compared against vector-only and keyword-only on the same eval (milestone 7).
+Milestones 1–7 are done: setup, ingest, search with eval, ask, the web page, Elasticsearch keyword search with a per-request search mode, and hybrid search with reciprocal rank fusion. On the first test set (17 stories, 10 questions), hybrid matches vector-only and beats keyword-only on ranking quality, and all three find the right story in the top 3 every time. That set is too small to show hybrid's advantage on exact-term queries; [spec.md](spec.md) §7 has the comparison and its limits.

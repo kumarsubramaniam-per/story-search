@@ -90,7 +90,7 @@ To add keyword search with Elasticsearch (optional; the container is set up in s
 ```bash
 ELASTICSEARCH_URL=http://localhost:9200       # setting this turns Elasticsearch on; unset means off
 ELASTICSEARCH_ANALYZER=english                # optional: how text is split into terms (default english)
-SEARCH_MODE=vector                            # optional: default search method, vector or keyword (default vector)
+SEARCH_MODE=vector                            # optional: default search method, vector, keyword or hybrid (default vector)
 ```
 
 `english` stems words (so "scaling" matches "scaled") and drops common ones; for other languages use another built-in analyzer name, such as `german` or `french`. Changing it recreates the Elasticsearch index on the next ingest, which costs nothing and doesn't touch Milvus. See spec §5.

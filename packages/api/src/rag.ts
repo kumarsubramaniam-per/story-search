@@ -34,7 +34,7 @@ export type AskResult = {
   truncated: boolean; // true if the answer hit the output cap
   cited: string[]; // story ids the answer cites that were really in the context
   invalidCitations: string[]; // ids the answer cites that were NOT in the context (should be empty)
-  sources: { chunk_id: string; story_id: string; title: string; score: number }[]; // everything retrieved
+  sources: { chunk_id: string; story_id: string; title: string; score: number; ranks?: { vector?: number; keyword?: number } }[]; // everything retrieved
   usage: { prompt_tokens: number; completion_tokens: number };
   mode: SearchMode; // how the stories were retrieved
   noMatches: boolean; // true when retrieval found no story (below MIN_SCORE, or no keyword match): the chat model was not called
@@ -127,7 +127,7 @@ export async function askQuestion(
     truncated: choice.finish_reason === "length",
     cited,
     invalidCitations: invalid,
-    sources: hits.map((h) => ({ chunk_id: h.chunk_id, story_id: h.story_id, title: h.title, score: h.score })),
+    sources: hits.map((h) => ({ chunk_id: h.chunk_id, story_id: h.story_id, title: h.title, score: h.score, ranks: h.ranks })),
     usage,
     mode,
     noMatches: false,
