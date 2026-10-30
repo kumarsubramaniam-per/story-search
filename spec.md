@@ -1,4 +1,4 @@
-# Story Search — Spec (v0.8)
+# Story Search — Spec (v0.9)
 
 *Status: milestones 1–6 are built (see §9). §§3–8 and 10 describe what is built unless marked v2.*
 
@@ -134,6 +134,8 @@ story-search/              # monorepo (npm workspaces)
   scripts/
     dev-up.sh              # start Docker Desktop + Milvus + Elasticsearch, wait until healthy
     dev-down.sh            # stop the containers, quit Docker Desktop (data kept)
+  docs/
+    screenshot.png         # README screenshot of the web page, rendered with made-up sample stories
   packages/
     api/                   # Fastify backend (run with tsx, no build step)
       src/env.ts           # loads the root .env by explicit path

@@ -28,7 +28,7 @@ Local learning project: semantic search and RAG over a private collection of doc
 Anyone should be able to use this project for their own content by setting environment variables and pointing `STORIES_DIR` at their files. A "story" is any self-contained piece of content small enough to embed as one chunk (article, note, FAQ entry, Q&A...).
 
 - Nothing in code, prompts, UI text, comments, docs, tests or commit messages may be specific to one dataset or domain. Use neutral words ("story", "collection", "document") and made-up neutral examples.
-- Never put real story titles, ids, names or text from `STORIES_DIR` in the repo, even in a comment or example.
+- Never put real story titles, ids, names or text from `STORIES_DIR` in the repo, even in a comment or example. That includes screenshots and example output in docs: render them with made-up sample stories, never a screenshot of the real collection.
 - Don't hardcode a document layout (header shapes, marker phrases, id formats) or assume an id shape. Anything specific to one collection is configuration: an env variable (name in `.env.example`) or a file in `STORIES_DIR`.
 - Before finishing a milestone, grep the changes for domain-specific words and for hardcoded layouts, and fix what you find.
 

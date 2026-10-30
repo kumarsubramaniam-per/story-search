@@ -9,6 +9,10 @@ It works with any content you can split into **stories**: self-contained pieces 
 
 Everything runs locally on a Mac. Your documents stay outside this repo.
 
+![The Story Search web page: an Ask answer with cited sources, and a keyword search result](docs/screenshot.png)
+
+*The web page, shown with made-up sample stories: an Ask answer using vector search, and a keyword search with BM25 scores.*
+
 ## Docs
 
 | File | What it covers |
