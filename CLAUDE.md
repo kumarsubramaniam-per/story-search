@@ -37,7 +37,7 @@ Anyone should be able to use this project for their own content by setting envir
 - **`docker-compose.yml`**: don't modify, regenerate or re-download it. It contains a required MinIO image fix (see SETUP.md §5) and the Elasticsearch service the user approved in milestone 6.
 - **`SETUP.md`**: only edit when asked.
 - **`spec.md`**: keep it current (see "Keeping the spec current"), but never change or remove an existing §11 decision without asking; new decisions may be added.
-- **`sdd-journey.md`**: the author's personal write-up of how this project was built, kept for publishing. Do not read, edit, rewrite, summarize or quote it until the user says so. Exclude it from searches and audits too (for example `git grep ... ':!sdd-journey.md'`).
+- **`docs/sdd-journey.md`**: the author's personal write-up of how this project was built, kept for publishing. Do not read, edit, rewrite, summarize or quote it until the user says so. Exclude it from searches and audits too (for example `git grep ... ':!docs/sdd-journey.md'`).
 - **`volumes/`**: Milvus data (the folder under `DOCKER_VOLUME_DIRECTORY`, see SETUP.md §5); never edit or delete unless asked.
 
 ## Secrets and private data

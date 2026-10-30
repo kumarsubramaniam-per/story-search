@@ -144,7 +144,6 @@ story-search/              # monorepo (npm workspaces)
   spec.md
   SETUP.md                 # one-time prework: Docker, Milvus, .env, OpenAI key, story folder
   CLAUDE.md                # working rules for Claude Code
-  sdd-journey.md           # the author's own build story, for publishing (Claude Code leaves it alone unless asked)
   package.json             # workspaces: packages/*; scripts: dev:up, dev:down, check:milvus, ingest, ingest:dry, api, eval
   tsconfig.base.json
   .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN, MIN_SCORE, ELASTICSEARCH_URL, ELASTICSEARCH_ANALYZER, SEARCH_MODE, LOG_FILE
@@ -155,6 +154,7 @@ story-search/              # monorepo (npm workspaces)
     dev-up.sh              # start Docker Desktop + Milvus + Elasticsearch, wait until healthy
     dev-down.sh            # stop the containers, quit Docker Desktop (data kept)
   docs/
+    sdd-journey.md         # the author's own build story, for publishing (Claude Code leaves it alone unless asked)
     screenshot.png         # README screenshot of the web page, rendered with made-up sample stories
   packages/
     api/                   # Fastify backend (run with tsx, no build step)

@@ -20,6 +20,7 @@ Everything runs locally on a Mac. Your documents stay outside this repo.
 | [spec.md](spec.md) | What is built: scope, data model, API, guardrails, milestones, decisions |
 | [SETUP.md](SETUP.md) | One-time setup: Docker, Milvus, `.env`, OpenAI project and key, story folder |
 | [CLAUDE.md](CLAUDE.md) | Working rules for Claude Code in this repo |
+| [docs/sdd-journey.md](docs/sdd-journey.md) | The author's story of building this with spec-driven development and Claude Code, including what went wrong |
 
 ## Quick start
 
