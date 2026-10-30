@@ -27,7 +27,14 @@
   }
   input[type="text"] { width: 100%; }
   .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-  .modes label { margin-right: 14px; cursor: pointer; }
+  .groups { display: flex; flex-wrap: wrap; gap: 12px; }
+  fieldset.group { flex: 1 1 260px; margin: 0; padding: 4px 14px 10px; border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+  .sub { margin: 8px 0 0; font-size: 0.8125rem; line-height: 1.4; color: var(--muted); }
+  fieldset.group legend { padding: 0 6px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  .modes label { margin-right: 14px; cursor: pointer; white-space: nowrap; }
+  .modes label:last-child { margin-right: 0; }
+  .modes label.disabled { opacity: 0.5; cursor: not-allowed; }
+  .row button.primary { margin-left: auto; }
   button { cursor: pointer; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
   button:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -57,17 +64,28 @@
   <form id="form">
     <input id="query" type="text" maxlength="500" autocomplete="off" required
            placeholder="Search or ask about your stories" aria-label="Query">
+    <div class="groups">
+      <fieldset class="group modes">
+        <legend>What to do</legend>
+        <label title="Show the best-matching stories"><input type="radio" name="action" value="search" checked> Search</label>
+        <label title="Write an answer from the top stories (a paid chat call)"><input type="radio" name="action" value="ask"> Ask</label>
+        <p class="sub" id="sub-action"></p>
+      </fieldset>
+      <fieldset class="group modes">
+        <legend>How to find stories</legend>
+        <label id="m-vector" title="By meaning, using embeddings"><input type="radio" name="method" value="vector" checked> Vector</label>
+        <label id="m-keyword" title="By the words you type (BM25)"><input type="radio" name="method" value="keyword"> Keyword</label>
+        <label id="m-hybrid" title="Both combined"><input type="radio" name="method" value="hybrid"> Hybrid</label>
+        <p class="sub" id="sub-method"></p>
+      </fieldset>
+    </div>
     <div class="row">
-      <span class="modes" role="radiogroup" aria-label="Mode">
-        <label><input type="radio" name="mode" value="search" checked> Search</label>
-        <label><input type="radio" name="mode" value="ask"> Ask</label>
-      </span>
-      <label>Stories (k)
+      <label>Stories to use (k)
         <select id="k" aria-label="Number of stories">
           <option>1</option><option selected>3</option><option>5</option><option>10</option>
         </select>
       </label>
-      <button id="submit" class="primary" type="submit">Search</button>
+      <button id="submit" class="primary" type="submit">Find stories</button>
     </div>
     <p id="mode-hint" class="hint"></p>
   </form>
@@ -100,17 +118,68 @@
     return node;
   }
 
-  const HINTS = {
-    search: "Search embeds your query and shows the closest stories. Almost free.",
-    ask: "Ask also sends the top stories to the chat model to write an answer. It is a paid call, so one click = one charge.",
+  // Action = what to do (Search or Ask). Method = how stories are found (Vector, Keyword or Hybrid).
+  // Each box shows a line about the option currently selected in it, so the page explains what a click will do.
+  const ACTION_SUB = {
+    search: "Fetches the best-matching stories from the stores and shows them. No chat-model (LLM) call.",
+    ask: "Fetches the top stories, then sends them to the chat model (an LLM) to write an answer that cites them. One paid call.",
   };
-  function currentMode() { return form.elements.mode.value; }
-  function updateMode() {
-    hint.textContent = HINTS[currentMode()];
-    submitBtn.textContent = currentMode() === "ask" ? "Ask" : "Search";
+  const METHOD_SUB = {
+    vector: "Turns your query into an embedding, a list of numbers for its meaning, and finds the closest stories in Milvus. Finds paraphrases.",
+    keyword: "Matches the words in your query against the stories in Elasticsearch (BM25); words found in a story's title count for more than words in its text. Finding the stories needs no OpenAI call. Best for exact terms.",
+    hybrid: "Runs both searches and merges their rankings (reciprocal rank fusion). Arrives in milestone 7.",
+  };
+  // The OpenAI calls one click makes: an embedding for vector or hybrid, plus a chat call for Ask.
+  function callsText(action, method) {
+    const calls = [];
+    if (method === "vector" || method === "hybrid") calls.push("1 embedding call");
+    if (action === "ask") calls.push("1 chat call (skipped if nothing is found)");
+    return calls.length ? `This click makes: ${calls.join(" + ")}.` : "This click makes no OpenAI call.";
   }
-  form.addEventListener("change", updateMode);
-  updateMode();
+  function currentAction() { return form.elements.action.value; }
+  function currentMethod() { return form.elements.method.value; }
+  function updateControls() {
+    document.getElementById("sub-action").textContent = ACTION_SUB[currentAction()];
+    document.getElementById("sub-method").textContent = METHOD_SUB[currentMethod()];
+    hint.textContent = callsText(currentAction(), currentMethod());
+    // The button names the outcome, so it does not repeat the "Ask" / "Search" radio labels above it.
+    submitBtn.textContent = currentAction() === "ask" ? "Get answer" : "Find stories";
+  }
+  form.addEventListener("change", updateControls);
+  updateControls();
+
+  // Scores mean different things per method, so label them: cosine similarity is 0 to 1, BM25 has no upper limit.
+  function scoreText(method, score) {
+    if (method === "vector") return `similarity ${score.toFixed(3)}`;
+    if (method === "keyword") return `BM25 ${score.toFixed(2)}`;
+    return `score ${score.toFixed(4)}`;
+  }
+
+  // Ask the server which methods are set up and disable the others.
+  async function loadMethods() {
+    try {
+      const health = await (await fetch("/health")).json();
+      const titles = {
+        vector: "By meaning, using embeddings",
+        keyword: "By the words you type (BM25)",
+        hybrid: "Both combined",
+      };
+      const reasons = { keyword: "Needs ELASTICSEARCH_URL in .env and Elasticsearch running", hybrid: "Arrives in milestone 7" };
+      for (const method of ["vector", "keyword", "hybrid"]) {
+        const label = document.getElementById(`m-${method}`);
+        const available = Boolean(health.modes && health.modes[method]);
+        label.querySelector("input").disabled = !available;
+        label.classList.toggle("disabled", !available);
+        label.title = available ? titles[method] : reasons[method] || "Not available";
+      }
+      const chosen = form.querySelector(`input[name="method"][value="${health.defaultMode}"]`);
+      if (chosen && !chosen.disabled) chosen.checked = true;
+      updateControls();
+    } catch {
+      // The server is unreachable; the first search will show the error. Leave the controls as they are.
+    }
+  }
+  loadMethods();
 
   function updateHistoryUi() {
     const n = historyEl.children.length;
@@ -120,12 +189,12 @@
   clearBtn.addEventListener("click", () => { historyEl.replaceChildren(); updateHistoryUi(); });
   updateHistoryUi();
 
-  async function callApi(mode, query, k) {
+  async function callApi(action, method, query, k) {
     let res;
     try {
-      res = mode === "ask"
-        ? await fetch("/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question: query, k }) })
-        : await fetch(`/search?q=${encodeURIComponent(query)}&k=${k}`);
+      res = action === "ask"
+        ? await fetch("/ask", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ question: query, k, mode: method }) })
+        : await fetch(`/search?q=${encodeURIComponent(query)}&k=${k}&mode=${method}`);
     } catch {
       throw new Error("Could not reach the server. Is it running? (npm run api)");
     }
@@ -134,17 +203,18 @@
     return body;
   }
 
+  function noMatchText(body) {
+    if (body.mode === "keyword") return "No keyword matches for these words.";
+    return body.minScore != null ? `No close matches: nothing scored above the minimum of ${body.minScore}.` : "No results.";
+  }
+
   function renderSearch(body) {
     const box = el("div");
-    if (body.results.length === 0) {
-      box.append(el("p", "notfound", body.minScore != null
-        ? `No close matches: nothing scored above the minimum of ${body.minScore}.`
-        : "No results."));
-    }
+    if (body.results.length === 0) box.append(el("p", "notfound", noMatchText(body)));
     for (const hit of body.results) {
       const row = el("div", "hit");
       const head = el("div", "card-head");
-      head.append(el("span", "badge", hit.story_id), el("strong", "", hit.title), el("span", "meta", `score ${hit.score.toFixed(3)}`));
+      head.append(el("span", "badge", hit.story_id), el("strong", "", hit.title), el("span", "meta", scoreText(body.mode, hit.score)));
       row.append(head, el("p", "", hit.snippet.length >= 300 ? hit.snippet + "…" : hit.snippet));
       box.append(row);
     }
@@ -154,7 +224,7 @@
   function renderAsk(body) {
     const box = el("div");
     if (body.noMatches) {
-      box.append(el("p", "notfound", `No close matches: nothing scored above the minimum of ${body.minScore}, so no answer was generated and no chat call was made.`));
+      box.append(el("p", "notfound", `${noMatchText(body)} No answer was generated and no chat call was made.`));
       return box;
     }
     if (body.found) box.append(el("p", "answer", body.answer));
@@ -167,7 +237,7 @@
       const row = el("div", "hit");
       const head = el("div", "card-head");
       head.append(el("span", "badge" + (body.cited.includes(s.story_id) ? " cited" : ""), s.story_id), el("strong", "", s.title));
-      head.append(el("span", "meta", `score ${s.score.toFixed(3)}${body.cited.includes(s.story_id) ? " · cited" : ""}`));
+      head.append(el("span", "meta", `${scoreText(body.mode, s.score)}${body.cited.includes(s.story_id) ? " · cited" : ""}`));
       row.append(head);
       box.append(row);
     }
@@ -180,7 +250,8 @@
     if (busy) return; // one request at a time, so a double-click can't cause two paid calls
     const query = queryInput.value.trim();
     if (!query) return;
-    const mode = currentMode();
+    const action = currentAction();
+    const method = currentMethod();
     const k = Number(kSelect.value);
 
     busy = true;
@@ -189,15 +260,20 @@
     // Add the card immediately (newest on top), then fill it in when the response arrives.
     const card = el("section", "card");
     const head = el("div", "card-head");
-    head.append(el("span", "badge", mode === "ask" ? "Ask" : "Search"), el("span", "query", query), el("span", "meta", `k=${k} · ${new Date().toLocaleTimeString()}`));
-    const body = el("div", "", mode === "ask" ? "Asking…" : "Searching…");
+    head.append(
+      el("span", "badge", action === "ask" ? "Ask" : "Search"),
+      el("span", "badge", method),
+      el("span", "query", query),
+      el("span", "meta", `k=${k} · ${new Date().toLocaleTimeString()}`),
+    );
+    const body = el("div", "", action === "ask" ? "Asking…" : "Searching…");
     card.append(head, body);
     historyEl.prepend(card);
     updateHistoryUi();
 
     try {
-      const data = await callApi(mode, query, k);
-      body.replaceChildren(mode === "ask" ? renderAsk(data) : renderSearch(data));
+      const data = await callApi(action, method, query, k);
+      body.replaceChildren(action === "ask" ? renderAsk(data) : renderSearch(data));
     } catch (err) {
       body.replaceChildren(el("p", "error", err.message));
     } finally {

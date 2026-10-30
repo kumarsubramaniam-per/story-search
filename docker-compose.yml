@@ -60,6 +60,26 @@ services:
       - "etcd"
       - "minio"
 
+  # Keyword (BM25) search for milestone 6+. Local use only: security is off, so the port is bound to loopback.
+  # Data sits under DOCKER_VOLUME_DIRECTORY (outside iCloud), because Elasticsearch relies on file locks.
+  elasticsearch:
+    container_name: story-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.4.8
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/elasticsearch:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
 networks:
   default:
     name: milvus

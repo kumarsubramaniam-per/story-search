@@ -1,7 +1,7 @@
 import "./env.js";
 import OpenAI from "openai";
 import { getEncoding } from "js-tiktoken";
-import { searchByVector, searchStories } from "./searchMilvus.js";
+import { search, defaultMode, type SearchMode } from "./search.js";
 
 // Guardrails (spec §8): reject before spending, and cap what the model may spend.
 const MAX_PROMPT_TOKENS = 12_000; // k=3 is ~3k; this still allows k=10
@@ -36,7 +36,8 @@ export type AskResult = {
   invalidCitations: string[]; // ids the answer cites that were NOT in the context (should be empty)
   sources: { chunk_id: string; story_id: string; title: string; score: number }[]; // everything retrieved
   usage: { prompt_tokens: number; completion_tokens: number };
-  noMatches: boolean; // true when no story scored above MIN_SCORE: the chat model was not called
+  mode: SearchMode; // how the stories were retrieved
+  noMatches: boolean; // true when retrieval found no story (below MIN_SCORE, or no keyword match): the chat model was not called
 };
 
 /**
@@ -58,18 +59,24 @@ export function parseCitations(answer: string, retrievedIds: Set<string>): { cit
 }
 
 /** Retrieval-augmented answer: find the k closest stories, then have the chat model answer from them only. */
-export async function askQuestion(question: string, k: number, queryVector?: number[]): Promise<AskResult> {
+export async function askQuestion(
+  question: string,
+  k: number,
+  queryVector?: number[],
+  mode: SearchMode = defaultMode(),
+): Promise<AskResult> {
   const model = process.env.CHAT_MODEL;
   if (!model) throw new Error("CHAT_MODEL is not set in .env");
 
-  // Retrieve. A precomputed query vector (the eval's cache) skips the embedding call.
-  const hits = queryVector ? await searchByVector(queryVector, k) : await searchStories(question, k);
+  // Retrieve. A precomputed query vector (the eval's cache) skips the embedding call in vector mode.
+  const hits = await search(question, k, mode, queryVector);
 
-  // Nothing close enough (MIN_SCORE): skip the paid chat call and say so.
+  // Nothing found (below MIN_SCORE, or no keyword match): skip the paid chat call and say so.
   if (hits.length === 0) {
-    console.log("Chat: skipped, no story scored above MIN_SCORE");
+    console.log(`Chat: skipped, no story found (mode ${mode})`);
     return {
       answer: NOT_FOUND,
+      mode,
       model: "",
       found: false,
       truncated: false,
@@ -122,6 +129,7 @@ export async function askQuestion(question: string, k: number, queryVector?: num
     invalidCitations: invalid,
     sources: hits.map((h) => ({ chunk_id: h.chunk_id, story_id: h.story_id, title: h.title, score: h.score })),
     usage,
+    mode,
     noMatches: false,
   };
 }

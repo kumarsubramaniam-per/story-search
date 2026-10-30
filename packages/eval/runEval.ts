@@ -5,13 +5,16 @@ import { createHash } from "node:crypto";
 import { embedTexts, EMBEDDING_MODEL } from "../api/src/embed.js";
 import { searchByVector, getMinScore } from "../api/src/searchMilvus.js";
 import { askQuestion, type AskResult } from "../api/src/rag.js";
+import { search, SEARCH_MODES, type SearchMode } from "../api/src/search.js";
+import { closeEs } from "../api/src/searchEs.js";
 import { milvus } from "../api/src/milvus.js";
 
-// Usage: npm run eval -- [--mode direct|http] [--ask] [--no-cache] [--api http://127.0.0.1:3000]
-//   direct (default)  calls the search code in-process; query embeddings are cached on disk
-//   http              calls GET /search on a running server (npm run api); the server embeds each query
-//   --ask             test the RAG answers instead of search: one paid chat call per question (~$0.0035 each)
-//   --no-cache        direct mode: re-embed every question instead of using the cache
+// Usage: npm run eval -- [--mode vector|keyword] [--via direct|http] [--ask] [--no-cache] [--api http://127.0.0.1:3000]
+//   --mode      how stories are found: vector (default) or keyword (needs ELASTICSEARCH_URL). hybrid arrives in milestone 7
+//   --via       direct (default) calls the search code in-process; query embeddings are cached on disk
+//               http calls a running server (npm run api); the server embeds each query
+//   --ask       test the RAG answers instead of search: one paid chat call per question (~$0.0035 each)
+//   --no-cache  direct vector mode: re-embed every question instead of using the cache
 const TOP_K = 3;
 const TARGET = 8; // spec §7: expected story in the top 3 for at least 8 of 10
 
@@ -21,9 +24,13 @@ const option = (name: string, fallback: string) => {
   const i = args.indexOf(name);
   return i === -1 ? fallback : args[i + 1];
 };
-const mode = option("--mode", "direct");
+const via = option("--via", "direct");
+const mode = option("--mode", "vector") as SearchMode; // explicit default, so the result doesn't depend on SEARCH_MODE
 const apiUrl = option("--api", "http://127.0.0.1:3000");
-if (mode !== "direct" && mode !== "http") throw new Error("--mode must be direct or http");
+if (via !== "direct" && via !== "http") throw new Error("--via must be direct or http");
+if (!SEARCH_MODES.includes(mode)) throw new Error(`--mode must be one of: ${SEARCH_MODES.join(", ")}`);
+// Keyword search needs no query vectors, so only vector mode embeds the questions (and uses the cache).
+const needsVectors = via === "direct" && mode === "vector";
 
 const storiesDir = process.env.STORIES_DIR;
 if (!storiesDir) throw new Error("STORIES_DIR is not set in .env");
@@ -41,7 +48,7 @@ type Hit = { story_id: string; score: number };
 // An id may be written with or without the "story-" prefix; compare them the same way.
 const norm = (id: string) => id.toLowerCase().replace(/^story-/, "");
 
-// --- direct mode: embed (with a disk cache), then search by vector ---------------------------------
+// --- direct vector mode: embed (with a disk cache), then search by vector -------------------------
 
 // The cache is keyed by sha256(model + question), so it holds vectors only, no question text,
 // and changing the model or editing a question automatically misses. It sits outside the repo, in a hidden
@@ -76,12 +83,12 @@ async function embedQuestions(qs: { question: string }[]): Promise<{ vectors: Ma
   return { vectors, note: `cache: ${qs.length - missing.length}/${qs.length} hits, embedded ${missing.length}` };
 }
 
-// --- http mode: ask the running server ---------------------------------------------------------------
+// --- via http: ask the running server ----------------------------------------------------------------
 
 async function searchHttp(question: string): Promise<Hit[]> {
   let res: Response;
   try {
-    res = await fetch(`${apiUrl}/search?q=${encodeURIComponent(question)}&k=${TOP_K}`);
+    res = await fetch(`${apiUrl}/search?q=${encodeURIComponent(question)}&k=${TOP_K}&mode=${mode}`);
   } catch {
     throw new Error(`Could not reach ${apiUrl}. Is the server running? Start it with: npm run api`);
   }
@@ -95,7 +102,7 @@ async function askHttp(question: string): Promise<AskResult> {
     res = await fetch(`${apiUrl}/ask`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ question, k: TOP_K }),
+      body: JSON.stringify({ question, k: TOP_K, mode }),
     });
   } catch {
     throw new Error(`Could not reach ${apiUrl}. Is the server running? Start it with: npm run api`);
@@ -107,15 +114,19 @@ async function askHttp(question: string): Promise<AskResult> {
 // --- run ---------------------------------------------------------------------------------------------
 
 async function runSearchEval(vectors: Map<string, number[]>): Promise<void> {
-  const minScore = getMinScore();
+  const minScore = getMinScore(); // a cosine threshold: applies to vector mode only
   let inTop = 0;
   let first = 0;
   let weakest: { id: string; score: number } | undefined; // lowest score among the correct matches
   for (const q of questions) {
-    // Direct mode searches without the threshold, then applies MIN_SCORE here exactly as the app does, so the
-    // raw scores stay available for the gap report below. In http mode the server has already applied it.
-    const raw = mode === "direct" ? await searchByVector(vectors.get(q.question)!, TOP_K, null) : await searchHttp(q.question);
-    const hits = mode === "direct" ? raw.filter((h) => minScore === null || h.score >= minScore) : raw;
+    // Direct vector mode searches without the threshold, then applies MIN_SCORE here exactly as the app does, so
+    // the raw scores stay available for the gap report below. Over http the server has already applied it.
+    const raw = needsVectors
+      ? await searchByVector(vectors.get(q.question)!, TOP_K, null)
+      : via === "direct"
+        ? await search(q.question, TOP_K, mode)
+        : await searchHttp(q.question);
+    const hits = needsVectors ? raw.filter((h) => minScore === null || h.score >= minScore) : raw;
     const rank = hits.findIndex((h) => norm(h.story_id) === norm(q.expected_story_id)) + 1; // 0 = not found
     if (rank > 0) inTop++;
     if (rank === 1) first++;
@@ -132,7 +143,7 @@ async function runSearchEval(vectors: Map<string, number[]>): Promise<void> {
   if (inTop < TARGET) process.exitCode = 1;
 
   // Help choose MIN_SCORE: it should sit between the strongest negative-case match and the weakest correct match.
-  if (mode === "direct") {
+  if (needsVectors) {
     let strongestNegative: { id: string; score: number } | undefined;
     for (const n of negatives) {
       const [top] = await searchByVector(vectors.get(n.question)!, 1, null);
@@ -156,7 +167,7 @@ async function runSearchEval(vectors: Map<string, number[]>): Promise<void> {
 // Ask eval: does each answer cite the expected story, and do negative cases get "not found"?
 // Only ids, flags and token counts are printed, never answer, question or story text.
 async function runAskEval(vectors: Map<string, number[]>): Promise<void> {
-  const ask = (q: string) => (mode === "direct" ? askQuestion(q, TOP_K, vectors.get(q)) : askHttp(q));
+  const ask = (q: string) => (via === "direct" ? askQuestion(q, TOP_K, vectors.get(q), mode) : askHttp(q));
   let correct = 0;
   let invalid = 0;
   let tokensIn = 0;
@@ -206,14 +217,17 @@ try {
   const asking = flag("--ask");
   const toEmbed = [...questions, ...negatives]; // negatives are needed for the score-gap report too
   let vectors = new Map<string, number[]>();
-  let note = "embedded server-side, no cache";
-  if (mode === "direct") ({ vectors, note } = await embedQuestions(toEmbed));
+  let note = via === "http" ? "embedded server-side, no cache" : "no query embeddings needed";
+  if (needsVectors) ({ vectors, note } = await embedQuestions(toEmbed));
 
-  console.log(`Eval${asking ? " (ask)" : ""}: ${asking ? toEmbed.length : questions.length} questions, mode=${mode}, top ${TOP_K} (${note})`);
-  if (mode === "direct") console.log(`Cache file: ${cachePath}`);
+  console.log(
+    `Eval${asking ? " (ask)" : ""}: ${asking ? toEmbed.length : questions.length} questions, via=${via}, mode=${mode}, top ${TOP_K} (${note})`,
+  );
+  if (needsVectors) console.log(`Cache file: ${cachePath}`);
   console.log();
 
   await (asking ? runAskEval(vectors) : runSearchEval(vectors));
 } finally {
   await milvus.closeConnection();
+  await closeEs();
 }

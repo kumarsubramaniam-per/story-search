@@ -85,6 +85,16 @@ MIN_SCORE=0.2                                 # similarity cutoff, a number betw
 
 With it set, search returns nothing for a clearly unrelated query, and Ask skips the paid chat call. Cosine scores depend on your content, so pick the value by measurement: after ingesting, `npm run eval` prints the gap between your weakest correct match and your strongest negative case. See spec §7.
 
+To add keyword search with Elasticsearch (optional; the container is set up in step 5):
+
+```bash
+ELASTICSEARCH_URL=http://localhost:9200       # setting this turns Elasticsearch on; unset means off
+ELASTICSEARCH_ANALYZER=english                # optional: how text is split into terms (default english)
+SEARCH_MODE=vector                            # optional: default search method, vector or keyword (default vector)
+```
+
+`english` stems words (so "scaling" matches "scaled") and drops common ones; for other languages use another built-in analyzer name, such as `german` or `french`. Changing it recreates the Elasticsearch index on the next ingest, which costs nothing and doesn't touch Milvus. See spec §5.
+
 Also commit a `.env.example` with the same variable names and no values.
 
 Notes:
@@ -150,12 +160,25 @@ To wipe and start clean: `docker compose down` then delete `volumes/`.
 
 ```bash
 chmod +x scripts/*.sh       # once, after cloning
-./scripts/dev-up.sh         # starts Docker Desktop if needed, starts Milvus, waits until healthy
-./scripts/dev-down.sh       # stops Milvus and quits Docker Desktop (data kept)
-./scripts/dev-down.sh --keep-docker   # stop Milvus only
+./scripts/dev-up.sh         # starts Docker Desktop if needed, starts Milvus and Elasticsearch, waits until healthy
+./scripts/dev-down.sh       # stops the containers and quits Docker Desktop (data kept)
+./scripts/dev-down.sh --keep-docker   # stop the containers only
 ```
 
 These are also available as `npm run dev:up` / `npm run dev:down` from the root `package.json`.
+
+### Optional: Elasticsearch for keyword search
+
+The repo's `docker-compose.yml` also defines an `elasticsearch` service (image `docker.elastic.co/elasticsearch/elasticsearch:9.4.8`, single node, security off, 512 MB heap). `dev-up.sh` starts it with Milvus and waits for it to be healthy.
+
+- **Local only.** Security is off, so the port is bound to `127.0.0.1:9200`; nothing else on your network can reach it. Don't expose it.
+- **Memory.** It uses roughly 1 GB on top of Milvus. When you don't need keyword search, `docker compose stop elasticsearch` frees it; `docker compose start elasticsearch` brings it back with its data.
+- **Data location.** It stores its data in `volumes/elasticsearch` under `DOCKER_VOLUME_DIRECTORY`, the same folder as Milvus, and the same iCloud warning applies (it relies on file locks).
+- **First start** downloads an image of about a gigabyte and takes a minute to become healthy.
+- **Turn it on:** set `ELASTICSEARCH_URL` in `.env` (step 4), then run `npm run ingest`. It indexes every story into Elasticsearch without re-embedding anything. If the URL is set but Elasticsearch isn't running, ingest stops before any paid call.
+- **Turn it off:** remove `ELASTICSEARCH_URL`. Everything else keeps working with vector search only.
+- **Check it:** `curl http://localhost:9200` returns a JSON document with the version.
+- If you re-download a fresh Milvus Compose file (above), re-add the `elasticsearch` service from this repo's copy.
 
 Optional: run **Attu**, Milvus's web UI, to browse collections visually.
 
@@ -168,6 +191,7 @@ Prework is done when:
 - [ ] `docker compose ps` shows all three Milvus containers healthy
 - [ ] `.env` exists at the repo root with the three required variables (plus `STORY_HEADER_PATTERN` if you split files into several stories); `.env` and `volumes/` are git-ignored
 - [ ] Your documents are in the folder `STORIES_DIR` points to (outside the repo)
+- [ ] (Optional) with `ELASTICSEARCH_URL` set, `docker compose ps` also shows `story-elasticsearch` healthy
 - [ ] OpenAI project has a budget limit
 - [ ] A small connection script (milestone 1) connects to `localhost:19530` and prints the Milvus server version
 

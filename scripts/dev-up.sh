@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the local environment: Docker Desktop (if needed) + Milvus Standalone.
+# Start the local environment: Docker Desktop (if needed) + Milvus Standalone + Elasticsearch.
 # Usage: ./scripts/dev-up.sh   (or: npm run dev:up)
 set -euo pipefail
 cd "$(dirname "$0")/.."   # always run from the repo root
@@ -19,23 +19,28 @@ if ! docker info >/dev/null 2>&1; then
 fi
 echo "Docker is running."
 
-# 2. Start Milvus (etcd + minio + standalone)
+# 2. Start everything in docker-compose.yml: Milvus (etcd + minio + standalone) and Elasticsearch
 docker compose up -d
 
-# 3. Wait until Milvus reports healthy
-echo "Waiting for Milvus to become healthy..."
-container_id=$(docker compose ps -q standalone)
-status="starting"
-for _ in $(seq 1 60); do
-  status=$(docker inspect -f '{{.State.Health.Status}}' "$container_id" 2>/dev/null || echo "starting")
-  [ "$status" = "healthy" ] && break
-  sleep 3
-done
+# 3. Wait until each service reports healthy. Usage: wait_healthy <compose service> <label> <tries>
+wait_healthy() {
+  local container_id status="starting"
+  container_id=$(docker compose ps -q "$1")
+  echo "Waiting for $2 to become healthy..."
+  for _ in $(seq 1 "$3"); do
+    status=$(docker inspect -f '{{.State.Health.Status}}' "$container_id" 2>/dev/null || echo "starting")
+    [ "$status" = "healthy" ] && break
+    sleep 3
+  done
+  if [ "$status" != "healthy" ]; then
+    docker compose ps
+    echo "$2 is not healthy yet (status: $status). Check: docker compose logs $1"
+    exit 1
+  fi
+}
+wait_healthy standalone Milvus 60
+wait_healthy elasticsearch Elasticsearch 40
 
 docker compose ps
-if [ "$status" = "healthy" ]; then
-  echo "Milvus is ready on localhost:19530"
-else
-  echo "Milvus is not healthy yet (status: $status). Check: docker compose logs standalone"
-  exit 1
-fi
+echo "Milvus is ready on localhost:19530"
+echo "Elasticsearch is ready on localhost:9200"

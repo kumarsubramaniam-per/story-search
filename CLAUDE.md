@@ -34,7 +34,7 @@ Anyone should be able to use this project for their own content by setting envir
 
 ## Do not touch
 
-- **`docker-compose.yml`**: don't modify, regenerate or re-download it. It contains a required MinIO image fix (see SETUP.md §5).
+- **`docker-compose.yml`**: don't modify, regenerate or re-download it. It contains a required MinIO image fix (see SETUP.md §5) and the Elasticsearch service the user approved in milestone 6.
 - **`SETUP.md`**: only edit when asked.
 - **`spec.md`**: keep it current (see "Keeping the spec current"), but never change or remove an existing §11 decision without asking; new decisions may be added.
 - **`sdd-journey.md`**: the author's personal write-up of how this project was built, kept for publishing. Do not read, edit, rewrite, summarize or quote it until the user says so. Exclude it from searches and audits too (for example `git grep ... ':!sdd-journey.md'`).
@@ -53,6 +53,7 @@ Anyone should be able to use this project for their own content by setting envir
 - **Backend:** Fastify (`packages/api`).
 - **Env loading:** one root `.env`, loaded by explicit path (npm workspace scripts run from inside each package folder, so default `dotenv` lookup won't find it).
 - **Milvus:** `@zilliz/milvus2-sdk-node`, server at `localhost:19530`. Collection `stories`, schema per spec §5. Index **FLAT**, metric **COSINE**.
+- **Elasticsearch (optional keyword search):** `@elastic/elasticsearch` 9.4.x against the 9.4.8 container, enabled by `ELASTICSEARCH_URL`. Index `stories`, same `chunk_id`s as Milvus. Local only: security is off and the port is bound to `127.0.0.1`. Search method is a `mode` (`vector`, `keyword`, later `hybrid`); keep the code working with Elasticsearch unset.
 - **Embeddings:** `text-embedding-3-small`, 1536 dimensions, one chunk per story.
 - **Generation:** OpenAI **Chat Completions API** (`/v1/chat/completions`), model from `CHAT_MODEL`. Do **not** use the Responses API; the project's API key is restricted to Chat Completions and Embeddings only.
 - **Defaults:** k = 3.
@@ -67,8 +68,8 @@ Anyone should be able to use this project for their own content by setting envir
 ## Useful commands
 
 ```bash
-./scripts/dev-up.sh          # start Docker Desktop + Milvus, wait until healthy
-./scripts/dev-down.sh        # stop Milvus, quit Docker Desktop (data kept)
+./scripts/dev-up.sh          # start Docker Desktop + Milvus + Elasticsearch, wait until healthy
+./scripts/dev-down.sh        # stop the containers, quit Docker Desktop (data kept)
 docker compose ps            # container status
 docker compose logs -f standalone   # Milvus logs
 curl http://localhost:9091/healthz  # Milvus health (expects OK)
@@ -77,5 +78,5 @@ npm run check:milvus         # connect to Milvus and print its version
 npm run ingest:dry           # parse and chunk only; no OpenAI or Milvus calls
 npm run ingest -- [--rebuild] [--batch-size N]   # embed new/changed stories into Milvus
 npm run api                  # Fastify server + web page at http://127.0.0.1:3000
-npm run eval -- [--ask] [--mode http] [--no-cache]   # search eval; --ask makes paid chat calls
+npm run eval -- [--ask] [--mode vector|keyword] [--via http] [--no-cache]   # search eval; --ask makes paid chat calls
 ```

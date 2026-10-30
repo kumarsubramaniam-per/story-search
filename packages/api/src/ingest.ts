@@ -10,10 +10,11 @@ import {
   deleteChunks,
   milvus,
 } from "./milvus.js";
+import { getEsUrl, pingEs, ensureEsIndex, indexChunks, deleteStaleEs, closeEs } from "./searchEs.js";
 
 // Usage: tsx src/ingest.ts [--dry-run] [--rebuild] [--batch-size N]
 //   --dry-run     parse and chunk only; no OpenAI or Milvus calls
-//   --rebuild     drop and recreate the Milvus collection first
+//   --rebuild     drop and recreate the Milvus collection (and the Elasticsearch index) first
 //   --batch-size  chunks per hash-lookup / embedding request / upsert (default 50)
 //
 // Reads every .pdf, .txt and .md file under STORIES_DIR. By default each file is one story; set
@@ -45,8 +46,18 @@ if (headerPattern && !headerPattern.source.includes("(?<title>")) {
 const files = listSourceFiles(storiesDir);
 if (files.length === 0) throw new Error("No .pdf, .txt or .md files found under STORIES_DIR");
 
+// With ELASTICSEARCH_URL set, stories are also indexed for keyword search (the index is created if missing).
+const esEnabled = getEsUrl() !== null;
+
 try {
-  if (!dryRun) await ensureCollection(rebuild);
+  if (!dryRun) {
+    // Check Elasticsearch first, so an outage stops the run before any paid embedding call.
+    if (esEnabled) {
+      await pingEs();
+      await ensureEsIndex(rebuild);
+    }
+    await ensureCollection(rebuild);
+  }
 
   // One file at a time, so memory stays flat however many files there are.
   const seenIds = new Map<string, string>(); // chunk_id -> file it came from
@@ -80,9 +91,18 @@ try {
   if (dryRun) console.log("Dry run: no API or Milvus calls made.");
 } finally {
   await milvus.closeConnection();
+  await closeEs();
 }
 
 async function ingestFile(file: string, chunks: Chunk[]): Promise<void> {
+  // Keyword index first: it is free and idempotent, so every run indexes every chunk (no hash check needed).
+  // That also fills a newly started Elasticsearch without re-embedding anything.
+  if (esEnabled) {
+    await indexChunks(chunks);
+    const removed = await deleteStaleEs(file, chunks.map((c) => c.chunk_id));
+    console.log(`Elasticsearch: ${chunks.length} indexed${removed ? `, ${removed} stale removed` : ""}`);
+  }
+
   let embedded = 0;
   let skipped = 0;
 
