@@ -1,6 +1,7 @@
 import "./env.js";
 import OpenAI from "openai";
 import { getEncoding } from "js-tiktoken";
+import { timed, addToRequest } from "./activity.js";
 
 export const EMBEDDING_MODEL = "text-embedding-3-small";
 export const EMBEDDING_DIMS = 1536;
@@ -18,6 +19,11 @@ const openai = new OpenAI({ maxRetries: 0 });
 
 let runningTotalTokens = 0;
 
+/** Tokens billed for embeddings so far in this process (the ingest summary logs it). */
+export function totalEmbeddingTokens(): number {
+  return runningTotalTokens;
+}
+
 /** Embeds one batch of texts in a single API request; returns vectors in the same order as the input. */
 export async function embedTexts(texts: string[]): Promise<number[][]> {
   const counts = texts.map((t) => encoder.encode(t).length);
@@ -29,14 +35,17 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
     throw new Error(`Run would reach ${runningTotalTokens + total} tokens (ceiling ${MAX_TOKENS_PER_RUN}); stopping`);
   }
 
-  const res = await openai.embeddings.create({
-    model: EMBEDDING_MODEL,
-    input: texts,
-    dimensions: EMBEDDING_DIMS,
-  });
+  const res = await timed("embed", () =>
+    openai.embeddings.create({
+      model: EMBEDDING_MODEL,
+      input: texts,
+      dimensions: EMBEDDING_DIMS,
+    }),
+  );
 
   // usage is what OpenAI actually billed; compare it with our pre-count.
   runningTotalTokens += res.usage.total_tokens;
+  addToRequest("embedding_tokens", res.usage.total_tokens);
   console.log(
     `Embeddings: ${texts.length} inputs, ${res.usage.total_tokens} tokens billed (pre-count ${total}), running total ${runningTotalTokens}`,
   );

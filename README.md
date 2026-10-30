@@ -89,6 +89,10 @@ Ingest re-embeds only stories whose `content_hash` changed, so rerunning it is c
 
 `k` defaults to 3 (allowed 1–10); the question is limited to 500 characters. Details are in [spec.md](spec.md) §6.
 
+## Activity log
+
+The server and ingest append one JSON line per event to `logs/activity.log` (git-ignored; set `LOG_FILE` in `.env` to move it): for each request the route, mode, status, total milliseconds, milliseconds per stage (embed, vector, keyword, fuse, chat), result counts and token counts. It never records query, question or story text, only their lengths. Watch it live with `tail -f logs/activity.log`. See [spec.md](spec.md) §8.
+
 ## Cost
 
 Embedding is cheap: a collection of about 17 stories of ~700 words costs about $0.0003. A vector search is almost free (one small embedding), and a keyword search makes no OpenAI call at all. An ask costs about $0.0035 with `gpt-5.4-mini`: one embedding plus one chat call. Token usage is logged for every call, prompts and output are capped, and nothing is retried automatically. See [spec.md](spec.md) §8.
@@ -113,4 +117,4 @@ The full tree is in [spec.md](spec.md) §10.
 
 ## Status
 
-Milestones 1–7 are done: setup, ingest, search with eval, ask, the web page, Elasticsearch keyword search with a per-request search mode, and hybrid search with reciprocal rank fusion. On the first test set (17 stories, 10 questions), hybrid matches vector-only and beats keyword-only on ranking quality, and all three find the right story in the top 3 every time. That set is too small to show hybrid's advantage on exact-term queries; [spec.md](spec.md) §7 has the comparison and its limits.
+Milestones 1–8 are done: setup, ingest, search with eval, ask, the web page, Elasticsearch keyword search with a per-request search mode, hybrid search with reciprocal rank fusion, and an activity log. On the first test set (17 stories, 10 questions), hybrid matches vector-only and beats keyword-only on ranking quality, and all three find the right story in the top 3 every time. That set is too small to show hybrid's advantage on exact-term queries; [spec.md](spec.md) §7 has the comparison and its limits.

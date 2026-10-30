@@ -45,6 +45,7 @@ Anyone should be able to use this project for their own content by setting envir
 - Never print, log, echo or commit the contents of `.env` or the API key. Read config via environment variables only.
 - `.env` lives at the repo root and is git-ignored; keep `.env.example` in sync (names only, no values).
 - Story documents live **outside the repo** in `STORIES_DIR`. Read them from there; never copy story text into the repo, fixtures, tests or logs.
+- The activity log (`logs/activity.log`, git-ignored) must never contain query, question, story or answer text: log lengths, counts and timings only (spec §8). Keep that true when adding log fields.
 - Don't commit generated data, embeddings or Milvus volumes. Generated files derived from stories (such as the eval embedding cache) go in the hidden `STORIES_DIR/.story-search/` folder, never in the repo.
 
 ## Stack and conventions
@@ -78,5 +79,6 @@ npm run check:milvus         # connect to Milvus and print its version
 npm run ingest:dry           # parse and chunk only; no OpenAI or Milvus calls
 npm run ingest -- [--rebuild] [--batch-size N]   # embed new/changed stories into Milvus
 npm run api                  # Fastify server + web page at http://127.0.0.1:3000
+tail -f logs/activity.log    # activity log: one JSON line per request, ingest run and server start/stop
 npm run eval -- [--ask] [--mode vector|keyword|hybrid] [--compare] [--pool N] [--via http] [--no-cache]   # search eval; --compare = 3 methods side by side; --ask makes paid chat calls
 ```

@@ -2,6 +2,7 @@ import { searchByVector, searchStories, type SearchHit } from "./searchMilvus.js
 import { searchKeyword, getEsUrl } from "./searchEs.js";
 import { embedTexts } from "./embed.js";
 import { fuse } from "./fusion.js";
+import { timed } from "./activity.js";
 
 // How stories are found: by meaning (vector), by words (keyword, BM25), or both fused with RRF (hybrid).
 export type SearchMode = "vector" | "keyword" | "hybrid";
@@ -55,20 +56,23 @@ export async function search(
   if ((mode === "keyword" || mode === "hybrid") && !getEsUrl()) {
     throw new RequestError("Keyword and hybrid search need ELASTICSEARCH_URL in .env, with Elasticsearch running (npm run dev:up).");
   }
-  if (mode === "keyword") return searchKeyword(query, k);
+  const keyword = (n: number) => timed("keyword", () => searchKeyword(query, n));
+  if (mode === "keyword") return keyword(k);
 
   if (mode === "hybrid") {
     const pool = options.pool ?? poolSize(k);
     const vector = queryVector ?? (await embedTexts([query]))[0];
     // MIN_SCORE (inside searchByVector) trims weak vector hits before fusing, so an unrelated query is not
     // lifted by one lucky keyword match.
-    const [fromVector, fromKeyword] = await Promise.all([searchByVector(vector, pool), searchKeyword(query, pool)]);
-    return fuse(
-      [
-        { name: "vector", hits: fromVector },
-        { name: "keyword", hits: fromKeyword },
-      ],
-      k,
+    const [fromVector, fromKeyword] = await Promise.all([searchByVector(vector, pool), keyword(pool)]);
+    return timed("fuse", () =>
+      fuse(
+        [
+          { name: "vector", hits: fromVector },
+          { name: "keyword", hits: fromKeyword },
+        ],
+        k,
+      ),
     );
   }
 

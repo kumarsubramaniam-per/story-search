@@ -1,6 +1,6 @@
-# Story Search — Spec (v1.0)
+# Story Search — Spec (v1.1)
 
-*Status: milestones 1–7 are built (see §9). §§3–8 and 10 describe what is built.*
+*Status: milestones 1–8 are built (see §9). §§3–8 and 10 describe what is built.*
 
 ## 1. Goal
 Build a small local application to learn Milvus vector search and retrieval-augmented generation (RAG) over a private collection of short documents. The project is content-agnostic: a **story** is any self-contained piece of content small enough to embed as one chunk (an article, note, FAQ entry, Q&A, case study…). The first test set is ~20–30 stories of ~700 words each. Later, add Elasticsearch keyword search and fuse both result sets (hybrid search).
@@ -14,6 +14,7 @@ Build a small local application to learn Milvus vector search and retrieval-augm
 - Optional Elasticsearch BM25 keyword index over the same chunks; the search method (vector, keyword, hybrid) is chosen per request; hybrid fuses the two rankings with reciprocal rank fusion (RRF)
 - Ask endpoint: retrieve top-k, send to LLM, answer grounded only in retrieved context, with cited story IDs
 - Minimal web page calling the backend (Search/Ask toggle, search-method control, in-page history)
+- An activity log: one JSON line per request, with timings and token counts, in a git-ignored file (no query or story text)
 - Run everything locally on Mac
 
 **Later (optional)**
@@ -117,6 +118,13 @@ Expected spend is tiny (embedding the 17 first-test-set stories took 14,584 toke
 - **Hybrid costs the same as vector:** one embedding call; the fusion is plain code, and only the final top k reach the prompt
 - **No needless re-embedding:** store a `content_hash` per chunk; ingest re-embeds only new or changed stories
 
+**Activity log.** The app appends one JSON object per line to `logs/activity.log` at the repo root (git-ignored; `LOG_FILE` in `.env` overrides the path). At about 5 MB the file is renamed to `activity.log.1`, replacing an older one, so the log stays under about 10 MB. A write failure is reported once on the terminal and never fails a request. Events:
+- `request`, written when a response finishes, for every route including `/health`, validation failures and unknown routes: `id`, `route` (the route pattern, never the URL), `status`, `ms`, and `stages` (milliseconds in `embed`, `vector`, `keyword`, `fuse`, `chat`, whichever ran). `/search` adds `mode`, `k`, `query_chars`, `results`; `/ask` adds `question_chars`, `results`, `no_matches`, `found`, `truncated`, `cited`, `invalid_citations`, `model`, `prompt_tokens`, `completion_tokens`; a request that embedded also gets `embedding_tokens`; a failure adds `error {name, message}`
+- `server_start` (available modes, default mode, whether `MIN_SCORE` is set, chat model) and `server_stop`
+- `ingest`, one per run, dry runs included: `dry_run`, `rebuild`, `files`, `stories`, `embedded`, `skipped`, `stale_deleted`, `es_indexed`, `es_stale_removed`, `embedding_tokens`, `ms`, and on failure `error` (the error name only)
+
+The log holds no query text, question text, story text, snippets, titles or answers: only lengths, counts, numbers and timings. Error messages have the request's own query or question text scrubbed out before they are written, and are cut to 200 characters. Tokens are logged, not dollars, because prices change; cost is tokens times the current price.
+
 ## 9. Milestones
 1. Monorepo setup, environment, Milvus Standalone in Docker — **done**
 2. Ingest + embed + store — **done**
@@ -125,6 +133,7 @@ Expected spend is tiny (embedding the 17 first-test-set stories took 14,584 toke
 5. Web page — **done**
 6. Elasticsearch indexing — **done** (keyword mode, mode parameter, page method control)
 7. Hybrid search with RRF + compare results — **done** (`mode=hybrid`, per-method ranks on the page, `--compare` eval)
+8. Observability: activity log — **done** (per-request JSON lines with stage timings and token counts, server and ingest events, see §8)
 
 *Between milestones 5 and 6 the code was made content-agnostic (document layout and ids moved from code to configuration; see §3, §5, §11).*
 
@@ -138,8 +147,9 @@ story-search/              # monorepo (npm workspaces)
   sdd-journey.md           # the author's own build story, for publishing (Claude Code leaves it alone unless asked)
   package.json             # workspaces: packages/*; scripts: dev:up, dev:down, check:milvus, ingest, ingest:dry, api, eval
   tsconfig.base.json
-  .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN, MIN_SCORE, ELASTICSEARCH_URL, ELASTICSEARCH_ANALYZER, SEARCH_MODE
-  .gitignore               # .env, volumes/ (Milvus data), node_modules/
+  .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN, MIN_SCORE, ELASTICSEARCH_URL, ELASTICSEARCH_ANALYZER, SEARCH_MODE, LOG_FILE
+  .gitignore               # .env, volumes/ (Milvus data), node_modules/, logs/
+  logs/                    # activity.log (and activity.log.1), git-ignored; created on first write
   docker-compose.yml       # Milvus Standalone (etcd, minio, standalone) and Elasticsearch
   scripts/
     dev-up.sh              # start Docker Desktop + Milvus + Elasticsearch, wait until healthy
@@ -149,6 +159,7 @@ story-search/              # monorepo (npm workspaces)
   packages/
     api/                   # Fastify backend (run with tsx, no build step)
       src/env.ts           # loads the root .env by explicit path
+      src/activity.ts      # activity log: JSON-lines writer with rotation, per-request store, stage timers
       src/checkMilvus.ts   # connects to Milvus and prints the server version
       src/source.ts        # finds .pdf/.txt/.md files under STORIES_DIR and reads them as lines
       src/pdf.ts           # PDF -> text lines, footers stripped
@@ -191,4 +202,5 @@ Milvus and Elasticsearch data live in `volumes/` under `DOCKER_VOLUME_DIRECTORY`
 - One `/search` and `/ask` with a `mode` parameter (vector, keyword, hybrid) replaces the separate `/search/hybrid` route planned in §6 v0.7; `SEARCH_MODE` sets the default. In the eval, `--mode` is the search method and `--via` is how it runs
 - Hybrid fusion: reciprocal rank fusion with the standard constant 60, fixed in code rather than a setting, because it needs no tuning and the project has no data to tune it on. Each search contributes a candidate pool of at least 20, or 3× k, so a story ranked 4th by both methods can still win, while weak agreement deep in both lists does not outweigh one method's strong match (RRF is gentle with depth: rank 1 earns 0.0164, rank 20 earns 0.0125). The eval's `--pool` flag lets the effect be measured
 - In hybrid mode `MIN_SCORE` trims only the vector candidates before fusing, so an unrelated query is not lifted by a weak vector hit. The keyword list has no threshold (BM25 scores depend on the corpus), so weak keyword-only hits can pass through; a keyword score cutoff was left out until it is shown to be needed
+- Observability is a local activity log, not a monitoring stack: structured JSON lines in `logs/activity.log` inside the repo (git-ignored), written with Node's built-in `fs`, with stage timings carried through each request by `AsyncLocalStorage` so the search, embedding and chat code need no extra arguments. Query and question text are never logged, only their lengths, and error messages are scrubbed of them; tokens are logged but not dollars. The server now closes on Ctrl-C or a kill (SIGINT/SIGTERM) so the stop is logged. OpenTelemetry, metrics servers and dashboards were left out as too heavy for one local process
 - The page shows each hybrid result's rank in each list (for example "vector #2 · keyword #1") so a learner can see why a story landed where it did, and `npm run eval -- --compare` prints the three methods' ranks side by side, with top-3 counts, first-place counts and MRR@10

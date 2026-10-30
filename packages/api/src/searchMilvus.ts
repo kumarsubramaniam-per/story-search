@@ -1,5 +1,6 @@
 import { milvus, COLLECTION, withTimeout } from "./milvus.js";
 import { embedTexts } from "./embed.js";
+import { timed } from "./activity.js";
 
 export type SearchHit = {
   chunk_id: string;
@@ -32,11 +33,15 @@ export function getMinScore(): number | null {
  * Vector search: the up-to-k stories whose embeddings are closest to `vector`, best first. Hits below `minScore`
  * (default: MIN_SCORE) are dropped, so an off-topic query can return nothing. Pass null to keep every hit.
  */
-export async function searchByVector(
+export function searchByVector(
   vector: number[],
   k: number,
   minScore: number | null = getMinScore(),
 ): Promise<SearchHit[]> {
+  return timed("vector", () => runVectorSearch(vector, k, minScore));
+}
+
+async function runVectorSearch(vector: number[], k: number, minScore: number | null): Promise<SearchHit[]> {
   // A collection must be loaded into memory before it can be searched; do it once per process.
   loading ??= milvus.loadCollection({ collection_name: COLLECTION });
   try {

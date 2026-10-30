@@ -2,6 +2,7 @@ import "./env.js";
 import OpenAI from "openai";
 import { getEncoding } from "js-tiktoken";
 import { search, defaultMode, type SearchMode } from "./search.js";
+import { timed } from "./activity.js";
 
 // Guardrails (spec §8): reject before spending, and cap what the model may spend.
 const MAX_PROMPT_TOKENS = 12_000; // k=3 is ~3k; this still allows k=10
@@ -98,14 +99,16 @@ export async function askQuestion(
   const preCount = messages.reduce((n, m) => n + encoder.encode(m.content).length + 4, 3);
   if (preCount > MAX_PROMPT_TOKENS) throw new Error(`Prompt is ${preCount} tokens (ceiling ${MAX_PROMPT_TOKENS}); lower k`);
 
-  const res = await openai.chat.completions.create({
-    model,
-    messages,
-    max_completion_tokens: MAX_COMPLETION_TOKENS, // newer models reject the older max_tokens name
-    // Reasoning models (gpt-5.x, o-series) can spend hidden tokens thinking; turn that off for a predictable cost.
-    // Non-reasoning models (e.g. gpt-4.1-mini) would reject the parameter, so only send it when it applies.
-    ...(/^(gpt-5|o\d)/i.test(model) ? { reasoning_effort: "none" as const } : {}),
-  });
+  const res = await timed("chat", () =>
+    openai.chat.completions.create({
+      model,
+      messages,
+      max_completion_tokens: MAX_COMPLETION_TOKENS, // newer models reject the older max_tokens name
+      // Reasoning models (gpt-5.x, o-series) can spend hidden tokens thinking; turn that off for a predictable cost.
+      // Non-reasoning models (e.g. gpt-4.1-mini) would reject the parameter, so only send it when it applies.
+      ...(/^(gpt-5|o\d)/i.test(model) ? { reasoning_effort: "none" as const } : {}),
+    }),
+  );
 
   const usage = { prompt_tokens: res.usage?.prompt_tokens ?? 0, completion_tokens: res.usage?.completion_tokens ?? 0 };
   runningPromptTokens += usage.prompt_tokens;

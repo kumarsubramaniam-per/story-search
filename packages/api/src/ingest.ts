@@ -1,7 +1,8 @@
 import "./env.js";
 import { listSourceFiles, loadLines } from "./source.js";
 import { chunkStories, embedInput, type Chunk } from "./chunk.js";
-import { embedTexts } from "./embed.js";
+import { embedTexts, totalEmbeddingTokens } from "./embed.js";
+import { logEvent } from "./activity.js";
 import {
   ensureCollection,
   getStoredHashes,
@@ -49,6 +50,11 @@ if (files.length === 0) throw new Error("No .pdf, .txt or .md files found under 
 // With ELASTICSEARCH_URL set, stories are also indexed for keyword search (the index is created if missing).
 const esEnabled = getEsUrl() !== null;
 
+// Totals for the activity log (spec §8): counts and numbers only, no titles or text.
+const startedAt = performance.now();
+const tally = { stories: 0, embedded: 0, skipped: 0, stale_deleted: 0, es_indexed: 0, es_stale_removed: 0 };
+let failure: string | undefined;
+
 try {
   if (!dryRun) {
     // Check Elasticsearch first, so an outage stops the run before any paid embedding call.
@@ -61,7 +67,6 @@ try {
 
   // One file at a time, so memory stays flat however many files there are.
   const seenIds = new Map<string, string>(); // chunk_id -> file it came from
-  let storyCount = 0;
   for (const file of files) {
     const chunks = chunkStories(await loadLines(storiesDir, file), file, { headerPattern, bodyStartPattern });
 
@@ -82,25 +87,43 @@ try {
       console.warn(`  No stories found in ${file}; skipping it (its existing rows, if any, are kept).`);
       continue;
     }
-    storyCount += chunks.length;
+    tally.stories += chunks.length;
     if (dryRun) continue;
 
-    await ingestFile(file, chunks);
+    const done = await ingestFile(file, chunks);
+    for (const key of Object.keys(done) as (keyof typeof done)[]) tally[key] += done[key];
   }
-  if (storyCount === 0) throw new Error("No stories found in any file; check STORY_HEADER_PATTERN");
+  if (tally.stories === 0) throw new Error("No stories found in any file; check STORY_HEADER_PATTERN");
   if (dryRun) console.log("Dry run: no API or Milvus calls made.");
+} catch (err) {
+  failure = (err as Error).name; // the message can hold a story title, so only the name is logged
+  throw err;
 } finally {
+  logEvent("ingest", {
+    dry_run: dryRun,
+    rebuild,
+    files: files.length,
+    ...tally,
+    embedding_tokens: totalEmbeddingTokens(),
+    ms: Math.round(performance.now() - startedAt),
+    ...(failure ? { error: failure } : {}),
+  });
   await milvus.closeConnection();
   await closeEs();
 }
 
-async function ingestFile(file: string, chunks: Chunk[]): Promise<void> {
+type FileTally = Pick<typeof tally, "embedded" | "skipped" | "stale_deleted" | "es_indexed" | "es_stale_removed">;
+
+async function ingestFile(file: string, chunks: Chunk[]): Promise<FileTally> {
+  let esIndexed = 0;
+  let esRemoved = 0;
   // Keyword index first: it is free and idempotent, so every run indexes every chunk (no hash check needed).
   // That also fills a newly started Elasticsearch without re-embedding anything.
   if (esEnabled) {
     await indexChunks(chunks);
-    const removed = await deleteStaleEs(file, chunks.map((c) => c.chunk_id));
-    console.log(`Elasticsearch: ${chunks.length} indexed${removed ? `, ${removed} stale removed` : ""}`);
+    esIndexed = chunks.length;
+    esRemoved = await deleteStaleEs(file, chunks.map((c) => c.chunk_id));
+    console.log(`Elasticsearch: ${chunks.length} indexed${esRemoved ? `, ${esRemoved} stale removed` : ""}`);
   }
 
   let embedded = 0;
@@ -126,4 +149,5 @@ async function ingestFile(file: string, chunks: Chunk[]): Promise<void> {
   const stale = (await listChunkIdsBySource(file)).filter((id) => !current.has(id));
   for (let i = 0; i < stale.length; i += 100) await deleteChunks(stale.slice(i, i + 100));
   if (stale.length > 0) console.log(`Deleted ${stale.length} stale rows: ${stale.join(", ")}`);
+  return { embedded, skipped, stale_deleted: stale.length, es_indexed: esIndexed, es_stale_removed: esRemoved };
 }
