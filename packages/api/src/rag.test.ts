@@ -53,15 +53,28 @@ describe("parseCitations", () => {
     expect(parseCitations("As noted [G 7].", ids).cited).toEqual(["G 7"]);
   });
 
-  it("ignores tokens that are not id-shaped, and answers with no brackets", () => {
+  it("ignores bracketed prose instead of reporting its words as invalid citations", () => {
+    expect(parseCitations("Note [see the sample] here.", ids)).toEqual({ cited: [], invalid: [] });
+    expect(parseCitations("Note [see the sample, though!] here.", ids)).toEqual({ cited: [], invalid: [] });
+  });
+
+  it("ignores empty or punctuation-only groups, and answers with no brackets", () => {
     expect(parseCitations("Note [!!] and [, ;] here.", ids)).toEqual({ cited: [], invalid: [] });
     expect(parseCitations("No citations at all.", ids)).toEqual({ cited: [], invalid: [] });
   });
 
-  // Known limitation, pinned so a change is deliberate: bracketed prose is split into words and each word that
-  // looks like an id is reported invalid. The system prompt asks for plain text, so this should be rare.
-  it("reports each word of bracketed prose as an invalid citation (current behaviour)", () => {
-    expect(parseCitations("Note [see the sample] here.", ids).invalid).toEqual(["see", "the", "sample"]);
+  it("keeps a retrieved id found inside a comma list that also holds prose", () => {
+    const { cited, invalid } = parseCitations("See [alpha, see the sample].", ids);
+    expect(cited).toEqual(["alpha"]);
+    expect(invalid).toEqual([]);
+  });
+
+  it("only reads comma or semicolon lists: ids separated by spaces alone are not split", () => {
+    expect(parseCitations("See [alpha beta-2].", ids)).toEqual({ cited: [], invalid: [] });
+  });
+
+  it("still reports a lone id-like token that was not retrieved", () => {
+    expect(parseCitations("See [ghost-9].", ids)).toEqual({ cited: [], invalid: ["ghost-9"] });
   });
 });
 

@@ -43,17 +43,19 @@ export type AskResult = {
 
 /**
  * Finds the story ids an answer cites, written like [id] or [id1, id2]. Ids can have any shape, so a bracketed
- * token counts as a citation if it is a retrieved id; id-like tokens that are not retrieved are reported as invalid.
+ * group counts as a citation if it is exactly a retrieved id (ids may contain spaces), or if it is a list separated
+ * by commas or semicolons whose items are retrieved ids (cited) or single id-like tokens that were not retrieved
+ * (invalid). Anything else in brackets, such as a few words of prose, is not a citation and is ignored.
  */
 export function parseCitations(answer: string, retrievedIds: Set<string>): { cited: string[]; invalid: string[] } {
   const cited = new Set<string>();
   const invalid = new Set<string>();
   for (const group of answer.matchAll(/\[([^\]]+)\]/g)) {
     const inner = group[1].trim();
-    const tokens = retrievedIds.has(inner) ? [inner] : inner.split(/[,;\s]+/).filter(Boolean);
-    for (const token of tokens) {
-      if (retrievedIds.has(token)) cited.add(token);
-      else if (/^[\w.-]+$/.test(token)) invalid.add(token);
+    const items = retrievedIds.has(inner) ? [inner] : inner.split(/\s*[,;]\s*/).filter(Boolean);
+    for (const item of items) {
+      if (retrievedIds.has(item)) cited.add(item);
+      else if (/^[\w.-]+$/.test(item)) invalid.add(item);
     }
   }
   return { cited: [...cited], invalid: [...invalid] };
