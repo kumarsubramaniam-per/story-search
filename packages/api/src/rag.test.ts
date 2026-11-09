@@ -35,7 +35,7 @@ beforeEach(() => {
 });
 
 describe("parseCitations", () => {
-  const ids = new Set(["alpha", "beta-2", "G 7"]);
+  const ids = new Set(["alpha", "beta-2", "G 7", "Part 1; Intro", "a/b"]);
 
   it("finds single and grouped citations and reports each id once", () => {
     const { cited, invalid } = parseCitations("Yes [alpha]. Also [alpha, beta-2] and [beta-2].", ids);
@@ -43,25 +43,73 @@ describe("parseCitations", () => {
     expect(invalid).toEqual([]);
   });
 
-  it("reports id-like tokens that were not retrieved as invalid", () => {
+  it("reports ids that were not retrieved as invalid, alongside the ones that were", () => {
     const { cited, invalid } = parseCitations("See [alpha] and [ghost-9; alpha].", ids);
     expect(cited).toEqual(["alpha"]);
     expect(invalid).toEqual(["ghost-9"]);
   });
 
-  it("accepts a retrieved id that contains a space", () => {
-    expect(parseCitations("As noted [G 7].", ids).cited).toEqual(["G 7"]);
+  it("credits retrieved ids separated by spaces alone", () => {
+    expect(parseCitations("See [alpha beta-2].", ids)).toEqual({ cited: ["alpha", "beta-2"], invalid: [] });
   });
 
-  it("ignores tokens that are not id-shaped, and answers with no brackets", () => {
+  it("accepts retrieved ids that contain spaces, commas or semicolons, alone or inside a list", () => {
+    expect(parseCitations("As noted [G 7].", ids).cited).toEqual(["G 7"]);
+    expect(parseCitations("As noted [Part 1; Intro, alpha].", ids)).toEqual({ cited: ["Part 1; Intro", "alpha"], invalid: [] });
+  });
+
+  it("does not match a retrieved id that is only part of a longer token", () => {
+    expect(parseCitations("See [alpha-extra].", ids)).toEqual({ cited: [], invalid: ["alpha-extra"] });
+  });
+
+  it("prefers the longest retrieved id when one contains another", () => {
+    const nested = new Set(["7", "G 7"]);
+    expect(parseCitations("See [G 7].", nested)).toEqual({ cited: ["G 7"], invalid: [] });
+  });
+
+  it("makes no assumption about the shape of an invalid id", () => {
+    const { invalid } = parseCitations("See [x:1] and [dir/file.v2] and [Ünï-3].", ids);
+    expect(invalid).toEqual(["x:1", "dir/file.v2", "Ünï-3"]);
+  });
+
+  it("ignores bracketed prose instead of reporting its words as invalid citations", () => {
+    expect(parseCitations("Note [see the sample] here.", ids)).toEqual({ cited: [], invalid: [] });
+    expect(parseCitations("See [alpha, see the sample].", ids)).toEqual({ cited: ["alpha"], invalid: [] });
+  });
+
+  it("ignores empty or punctuation-only groups, and answers with no brackets", () => {
     expect(parseCitations("Note [!!] and [, ;] here.", ids)).toEqual({ cited: [], invalid: [] });
     expect(parseCitations("No citations at all.", ids)).toEqual({ cited: [], invalid: [] });
   });
 
-  // Known limitation, pinned so a change is deliberate: bracketed prose is split into words and each word that
-  // looks like an id is reported invalid. The system prompt asks for plain text, so this should be rare.
-  it("reports each word of bracketed prose as an invalid citation (current behaviour)", () => {
-    expect(parseCitations("Note [see the sample] here.", ids).invalid).toEqual(["see", "the", "sample"]);
+  it("skips an empty id instead of crediting it", () => {
+    expect(parseCitations("See [alpha, , beta-2].", new Set(["", "alpha", "beta-2"]))).toEqual({ cited: ["alpha", "beta-2"], invalid: [] });
+    expect(parseCitations("See [x].", new Set([""]))).toEqual({ cited: [], invalid: ["x"] });
+  });
+
+  it("returns citations in the order the answer gives them, across groups", () => {
+    expect(parseCitations("First [beta-2] then [alpha, G 7].", ids).cited).toEqual(["beta-2", "alpha", "G 7"]);
+  });
+
+  // Known limit, pinned so a change is deliberate: a leftover single word cannot be told from a made-up id,
+  // so comma-separated prose is still reported as invalid.
+  it("still reports single words in a comma-separated bracket (current behaviour)", () => {
+    expect(parseCitations("As shown [Smith, 2020].", ids).invalid).toEqual(["Smith", "2020"]);
+  });
+
+  // More known limits, pinned so a change is deliberate (see the spec decision on citations).
+  it("reports single punctuated words and footnote-style brackets as invalid (current behaviour)", () => {
+    expect(parseCitations("Fine [sic] and [1] and [though!].", ids).invalid).toEqual(["sic", "1", "though!"]);
+  });
+
+  it("credits a short retrieved id that stands alone between spaces in bracketed prose, and reports the other words (current behaviour)", () => {
+    expect(parseCitations("See [version 7 notes].", new Set(["7"]))).toEqual({ cited: ["7"], invalid: ["version", "notes"] });
+  });
+
+  it("does not support ids that contain a bracket (current behaviour)", () => {
+    const { cited, invalid } = parseCitations("See [doc[1]].", new Set(["doc[1]"]));
+    expect(cited).toEqual([]);
+    expect(invalid).toEqual(["doc[1"]);
   });
 });
 
