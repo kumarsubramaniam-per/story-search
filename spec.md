@@ -1,6 +1,6 @@
-# Story Search — Spec (v1.1)
+# Story Search — Spec (v1.2)
 
-*Status: milestones 1–8 are built (see §9). §§3–8 and 10 describe what is built.*
+*Status: milestones 1–9 are built (see §9). §§3–8 and 10 describe what is built.*
 
 ## 1. Goal
 Build a small local application to learn Milvus vector search and retrieval-augmented generation (RAG) over a private collection of short documents. The project is content-agnostic: a **story** is any self-contained piece of content small enough to embed as one chunk (an article, note, FAQ entry, Q&A, case study…). The first test set is ~20–30 stories of ~700 words each. Later, add Elasticsearch keyword search and fuse both result sets (hybrid search).
@@ -15,6 +15,7 @@ Build a small local application to learn Milvus vector search and retrieval-augm
 - Ask endpoint: retrieve top-k, send to LLM, answer grounded only in retrieved context, with cited story IDs
 - Minimal web page calling the backend (Search/Ask toggle, search-method control, in-page history)
 - An activity log: one JSON line per request, with timings and token counts, in a git-ignored file (no query or story text)
+- Unit tests (vitest) for the logic, offline and free: external services are mocked (§11)
 - Run everything locally on Mac
 
 **Later (optional)**
@@ -135,6 +136,7 @@ The log holds no query text, question text, story text, snippets, titles or answ
 7. Hybrid search with RRF + compare results — **done** (`mode=hybrid`, per-method ranks on the page, `--compare` eval)
 8. Observability: activity log — **done** (per-request JSON lines with stage timings and token counts, server and ingest events, see §8)
 
+9. Unit tests — **done** (vitest; `npm test`; offline; see §11 for what is and is not covered)
 *Between milestones 5 and 6 the code was made content-agnostic (document layout and ids moved from code to configuration; see §3, §5, §11).*
 
 ## 10. Repo Layout (monorepo)
@@ -144,8 +146,10 @@ story-search/              # monorepo (npm workspaces)
   spec.md
   SETUP.md                 # one-time prework: Docker, Milvus, .env, OpenAI key, story folder
   CLAUDE.md                # working rules for Claude Code
-  package.json             # workspaces: packages/*; scripts: dev:up, dev:down, check:milvus, ingest, ingest:dry, api, eval
+  package.json             # workspaces: packages/*; scripts: dev:up, dev:down, check:milvus, ingest, ingest:dry, api, eval, test, test:watch
   tsconfig.base.json
+  vitest.config.ts         # test runner config: packages/**/*.test.ts
+  test/setup.ts            # test setup: stubs env.ts, redirects the activity log to a temp file, clears config env between tests
   .env.example             # OPENAI_API_KEY, STORIES_DIR, CHAT_MODEL, DOCKER_VOLUME_DIRECTORY, STORY_HEADER_PATTERN, STORY_BODY_START_PATTERN, MIN_SCORE, ELASTICSEARCH_URL, ELASTICSEARCH_ANALYZER, SEARCH_MODE, LOG_FILE
   .gitignore               # .env, volumes/ (Milvus data), node_modules/, logs/
   logs/                    # activity.log (and activity.log.1), git-ignored; created on first write
@@ -171,7 +175,9 @@ story-search/              # monorepo (npm workspaces)
       src/searchEs.ts      # Elasticsearch: index, bulk indexing, stale delete, keyword (BM25) search
       src/search.ts        # search modes: vector, keyword or hybrid (runs both, then fuses), candidate pool, mode errors
       src/rag.ts           # ask: retrieve (by mode) -> prompt -> Chat Completions -> citation check
-      src/server.ts        # Fastify routes; also serves the web page
+      src/app.ts           # buildApp(): Fastify routes, hooks and activity logging, without listening (so tests can inject requests)
+      src/server.ts        # starts the app on 127.0.0.1:3000, logs start/stop, closes on SIGINT/SIGTERM
+      src/*.test.ts        # vitest unit tests, one per module, next to the code
       src/fusion.ts        # reciprocal rank fusion (RRF)
     web/
       index.html           # single static page, served by the API at GET /
@@ -204,3 +210,5 @@ Milvus and Elasticsearch data live in `volumes/` under `DOCKER_VOLUME_DIRECTORY`
 - In hybrid mode `MIN_SCORE` trims only the vector candidates before fusing, so an unrelated query is not lifted by a weak vector hit. The keyword list has no threshold (BM25 scores depend on the corpus), so weak keyword-only hits can pass through; a keyword score cutoff was left out until it is shown to be needed
 - Observability is a local activity log, not a monitoring stack: structured JSON lines in `logs/activity.log` inside the repo (git-ignored), written with Node's built-in `fs`, with stage timings carried through each request by `AsyncLocalStorage` so the search, embedding and chat code need no extra arguments. Query and question text are never logged, only their lengths, and error messages are scrubbed of them; tokens are logged but not dollars. The server now closes on Ctrl-C or a kill (SIGINT/SIGTERM) so the stop is logged. OpenTelemetry, metrics servers and dashboards were left out as too heavy for one local process
 - The page shows each hybrid result's rank in each list (for example "vector #2 · keyword #1") so a learner can see why a story landed where it did, and `npm run eval -- --compare` prints the three methods' ranks side by side, with top-3 counts, first-place counts and MRR@10
+- Unit tests use vitest (approved dependency). They are offline and free: OpenAI, Milvus and Elasticsearch are mocked, fixtures are made-up neutral text, and the activity log is redirected to a temp file. New or changed logic ships with tests in the same PR (CLAUDE.md, "Testing"). They cover what the code decides (fusion, chunking, ids and hashes, guardrails, validation, routes, log contents), not whether Milvus, Elasticsearch or OpenAI behave as expected; that stays with the eval and manual runs against the real services. Not unit-tested: PDF extraction (needs real PDF fixtures), `env.ts`, the Milvus/Elasticsearch collection and index setup, `checkMilvus.ts`, `server.ts` (a few lines of listen and signals) and `runEval.ts`
+- `server.ts` was split in two so routes can be tested without opening a port: `app.ts` exports `buildApp()` (all routes, hooks and logging; same behaviour), `server.ts` only listens and handles signals
