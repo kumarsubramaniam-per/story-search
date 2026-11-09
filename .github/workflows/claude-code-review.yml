@@ -31,6 +31,10 @@ jobs:
         with:
           fetch-depth: 1
 
+      # The gate below only counts comments the bot posts during this run, never ones left by an earlier push.
+      - name: Record start time
+        run: echo "REVIEW_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@v1
@@ -43,3 +47,36 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
+      # Gate: the review step above succeeds whenever it runs, whatever it finds, so this step turns the result
+      # into a pass or fail. Pass only on a fresh "No issues found" comment from the bot. Fail on inline findings,
+      # on any other fresh bot comment, and on silence (silence cannot be told from "did not review").
+      - name: Gate on review findings
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BOT: claude[bot]
+        run: |
+          fresh() { # fresh <api path>: the bot's comments created since this run started, as JSON lines
+            gh api --paginate "repos/$REPO/$1" --jq ".[] | select(.user.login == \"$BOT\" and .created_at >= \"$REVIEW_STARTED_AT\")"
+          }
+          for attempt in 1 2 3; do
+            inline=$(fresh "pulls/$PR/comments")
+            summary=$(fresh "issues/$PR/comments")
+            [ -n "$inline$summary" ] && break
+            echo "No review comment yet (attempt $attempt of 3); waiting 10s"
+            sleep 10
+          done
+
+          if [ -n "$inline" ]; then
+            echo "::error::The review left inline findings on this pull request."
+            exit 1
+          elif [ -z "$summary" ]; then
+            echo "::error::The review posted no comment, so there is no verdict to trust. Re-run the job."
+            exit 1
+          elif echo "$summary" | jq -e -s 'all(.[]; .body | test("No issues found"))' > /dev/null; then
+            echo "The review found no issues."
+          else
+            echo "::error::The review posted a comment that is not a clean verdict. Read it on the pull request."
+            exit 1
+          fi
