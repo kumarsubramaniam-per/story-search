@@ -32,6 +32,14 @@ Anyone should be able to use this project for their own content by setting envir
 - Don't hardcode a document layout (header shapes, marker phrases, id formats) or assume an id shape. Anything specific to one collection is configuration: an env variable (name in `.env.example`) or a file in `STORIES_DIR`.
 - Before finishing a milestone, grep the changes for domain-specific words and for hardcoded layouts, and fix what you find.
 
+## Testing
+
+- **Every change to logic ships with unit tests in the same PR.** New or changed functions, branches, error paths and edge cases get vitest tests (`*.test.ts`, next to the code). Don't open a PR until `npm test` passes and the new logic is covered; say in the milestone summary what the tests cover and what they deliberately don't.
+- Tests are offline and free: mock OpenAI, Milvus and Elasticsearch; never call a real service or spend tokens. Use `inject()` for Fastify routes.
+- Fixtures are made-up neutral text, never story text from `STORIES_DIR` (see "Keep it generic"). Tests must not write to the real `logs/activity.log` or `STORIES_DIR`.
+- If a test exposes a bug, report it before changing behavior; don't quietly adjust the test to match.
+- Fixing a bug means adding a test that fails without the fix.
+
 ## Do not touch
 
 - **`docker-compose.yml`**: don't modify, regenerate or re-download it. It contains a required MinIO image fix (see SETUP.md §5) and the Elasticsearch service the user approved in milestone 6.
@@ -76,6 +84,7 @@ docker compose logs -f standalone   # Milvus logs
 curl http://localhost:9091/healthz  # Milvus health (expects OK)
 
 npm run check:milvus         # connect to Milvus and print its version
+npm test                     # unit tests (vitest): offline, no Docker, no API calls
 npm run ingest:dry           # parse and chunk only; no OpenAI or Milvus calls
 npm run ingest -- [--rebuild] [--batch-size N]   # embed new/changed stories into Milvus
 npm run api                  # Fastify server + web page at http://127.0.0.1:3000

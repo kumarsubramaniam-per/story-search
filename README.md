@@ -68,6 +68,7 @@ Keyword search makes no OpenAI call, and vector search is better at paraphrases.
 
 | Command | What it does |
 |---|---|
+| `npm test` | Unit tests (vitest): offline, no Docker, no API key, no cost. `npm run test:watch` re-runs on save |
 | `npm run dev:up` / `dev:down` | Start / stop Docker Desktop, Milvus and Elasticsearch |
 | `npm run check:milvus` | Connect to Milvus and print its version |
 | `npm run ingest:dry` | Parse and chunk the files; prints story ids, titles and word counts |

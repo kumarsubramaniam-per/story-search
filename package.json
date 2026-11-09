@@ -12,11 +12,14 @@
     "ingest": "tsx packages/api/src/ingest.ts",
     "ingest:dry": "tsx packages/api/src/ingest.ts --dry-run",
     "api": "tsx packages/api/src/server.ts",
-    "eval": "tsx packages/eval/runEval.ts"
+    "eval": "tsx packages/eval/runEval.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
   }
 }
