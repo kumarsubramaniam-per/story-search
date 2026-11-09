@@ -41,21 +41,39 @@ export type AskResult = {
   noMatches: boolean; // true when retrieval found no story (below MIN_SCORE, or no keyword match): the chat model was not called
 };
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
- * Finds the story ids an answer cites, written like [id] or [id1, id2]. Ids can have any shape, so a bracketed
- * group counts as a citation if it is exactly a retrieved id (ids may contain spaces), or if it is a list separated
- * by commas or semicolons whose items are retrieved ids (cited) or single id-like tokens that were not retrieved
- * (invalid). Anything else in brackets, such as a few words of prose, is not a citation and is ignored.
+ * Finds the story ids an answer cites, written like [id] or [id1, id2]. Ids can have any shape (even contain spaces
+ * or commas), so each bracket group is searched for the retrieved ids themselves, longest first, wherever they sit
+ * between separators (space, comma, semicolon). What is left is split on commas and semicolons; a leftover item
+ * with no spaces that contains a letter or digit is reported as an invalid citation, and anything else (a few
+ * words of prose, punctuation) is ignored. A leftover single word cannot be told from a made-up id, so prose such
+ * as [Smith, 2020] is still reported, and a short retrieved id standing alone between spaces in bracketed prose
+ * is credited. Ids that contain a bracket are not supported.
  */
 export function parseCitations(answer: string, retrievedIds: Set<string>): { cited: string[]; invalid: string[] } {
   const cited = new Set<string>();
   const invalid = new Set<string>();
+  // Longest first, so "G 7" wins over "7". Empty ids are skipped (they would match between any two separators).
+  // The patterns depend only on the retrieved ids, so they are built once per answer, not once per bracket group.
+  const patterns = [...retrievedIds]
+    .filter((id) => id !== "")
+    .sort((a, b) => b.length - a.length)
+    .map((id) => ({ id, regex: new RegExp(`(?<![^\\s,;])${escapeRegExp(id)}(?![^\\s,;])`, "g") }));
   for (const group of answer.matchAll(/\[([^\]]+)\]/g)) {
-    const inner = group[1].trim();
-    const items = retrievedIds.has(inner) ? [inner] : inner.split(/\s*[,;]\s*/).filter(Boolean);
-    for (const item of items) {
-      if (retrievedIds.has(item)) cited.add(item);
-      else if (/^[\w.-]+$/.test(item)) invalid.add(item);
+    let rest = group[1];
+    const found: [position: number, id: string][] = [];
+    for (const { id, regex } of patterns) {
+      // Blank a match out with commas of the same length, so later ids cannot match inside it and positions hold.
+      rest = rest.replace(regex, (match, position: number) => {
+        found.push([position, id]);
+        return ",".repeat(match.length);
+      });
+    }
+    for (const [, id] of found.sort((a, b) => a[0] - b[0])) cited.add(id); // in the order the answer gives them
+    for (const item of rest.split(/\s*[,;]\s*/)) {
+      if (item && !/\s/.test(item) && /[\p{L}\p{N}]/u.test(item)) invalid.add(item);
     }
   }
   return { cited: [...cited], invalid: [...invalid] };
